@@ -2,7 +2,7 @@
 
 CCC is for Casual Codex Completion ✨
 
-Want CCC? Point Codex at this repo and tell it to follow [HOW_TO_INSTALL.md](/Users/roy.sadaka/Desktop/MachineLearning/research4/HOW_TO_INSTALL.md), that's it.
+Want CCC? Point Codex at this repo and tell it to follow [HOW_TO_INSTALL.md](HOW_TO_INSTALL.md), that's it.
 
 CCC is a macOS app that lets you summon Codex into almost any textbox.
 
@@ -133,7 +133,7 @@ Logs are written to:
 
 ## Install Notes
 
-Installation and release instructions live in [HOW_TO_INSTALL.md](/Users/roy.sadaka/Desktop/MachineLearning/research4/HOW_TO_INSTALL.md).
+Installation and release instructions live in [HOW_TO_INSTALL.md](HOW_TO_INSTALL.md).
 
 That keeps the install story explicit without shipping a Codex-only wrapper that would remain installed after the app itself is set up.
 
@@ -145,7 +145,7 @@ Collaborators are welcome. The ground rules are simple:
 - do not commit `.local`, `.build`, `dist`, screenshots, or session files
 - prefer focused changes over broad refactors
 
-See [CONTRIBUTING.md](/Users/roy.sadaka/Desktop/MachineLearning/research4/CONTRIBUTING.md) for the short contributor workflow.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the short contributor workflow.
 
 ## Current Limitations
 
