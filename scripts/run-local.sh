@@ -9,6 +9,8 @@ OUTPUT_BIN="$BUILD_DIR/CCC"
 CONFIG_DIR="$ROOT_DIR/.local"
 CONFIG_FILE="$CONFIG_DIR/config.toml"
 STATE_DIR="$CONFIG_DIR/state"
+MIN_MACOS_VERSION="${CCC_MIN_MACOS_VERSION:-13.0}"
+SWIFT_TARGET="$(uname -m)-apple-macos${MIN_MACOS_VERSION}"
 
 sdk_path() {
   local candidate
@@ -39,6 +41,7 @@ SWIFT_SOURCES=("${(@f)$(find "$ROOT_DIR/Sources/CCCApp" -name '*.swift' | sort)}
 
 swiftc \
   -sdk "$(sdk_path)" \
+  -target "$SWIFT_TARGET" \
   -module-cache-path "$MODULE_CACHE_DIR" \
   "${SWIFT_SOURCES[@]}" \
   -o "$OUTPUT_BIN"
