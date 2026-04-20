@@ -1,26 +1,42 @@
 # CCC
 
-CCC is an open-source macOS utility for context-aware inline completions in arbitrary text fields using the local Codex CLI.
+CCC is for Casual Codex Completion ✨
 
-The repo is intentionally small:
+Want CCC? Point Codex at this repo and tell it to follow [HOW_TO_INSTALL.md](/Users/roy.sadaka/Desktop/MachineLearning/research4/HOW_TO_INSTALL.md), that's it.
+
+CCC is a macOS app that lets you summon Codex into almost any textbox.
+
+Smash the `c` key three times to summon CCC into your scope. CCC will call out to your local Codex CLI, pull back a completion, and offer it inline right where you are working. Notes, chats, docs, forms, prompts, random text fields: if you can type there, CCC aims to bring Codex there too.
+
+The core idea is simple:
+
+- summon Codex in any textbox
+- stay inside the app you are already using
+- get better as Codex gets better 🫡
+
+CCC is built on top of Codex. CCC does not need to reinvent the brain. When Codex improves, CCC improves with it.
+
+Over time, CCC should get more personal. Through Codex Chronicle, it can build a better sense of how you write, what you care about, and how to help in a way that feels more like your own flow 🧠
+
+Repo layout:
 
 - app source in `Sources/CCCApp`
 - prompt templates in `Resources/Prompts`
 - build and packaging scripts in `scripts`
 - release support files in `Support`
-- Codex plugin metadata in `.codex-plugin` and `skills`
+- install instructions in `HOW_TO_INSTALL.md`
 
 ## What the app does
 
 - Runs as a lightweight macOS app with a small control window.
 - Watches typing through a global event tap while the app is active.
-- Requests a completion from the local Codex CLI when you type `ccc`.
+- Requests a completion from the local Codex CLI when you hit `ccc`.
 - Shows a floating suggestion near the caret when possible, or near the mouse as fallback.
 - Accepts the suggestion into the active app through paste-based injection.
 
 ## Shortcuts
 
-- `ccc`: request a suggestion
+- `ccc`: summon a suggestion
 - `Tab`: accept the visible suggestion
 - `Shift+Tab`: retry and ask for another option
 - `Escape`: dismiss the visible suggestion
@@ -93,13 +109,19 @@ Defaults:
 
 ## Permissions
 
-The app needs:
+On first run, macOS may ask for:
 
 - Accessibility
 - Input Monitoring
 - Screen Recording when screenshot context is enabled
 
-Without those, completion capture, anchoring, and screenshot-assisted context will degrade or fail.
+Why they matter:
+
+- Accessibility: required for reliable cross-app text insertion, text context probing, and better caret anchoring.
+- Input Monitoring: required to watch global key events so `ccc`, `Tab`, `Shift+Tab`, and `Escape` work across apps.
+- Screen Recording: only needed when screenshot context is enabled, so Codex can use the current window as extra context.
+
+Without these permissions, completion capture, anchoring, and screenshot-assisted context will degrade or fail.
 
 ## Logs
 
@@ -109,16 +131,11 @@ Logs are written to:
 ~/Library/Logs/CCC/ccc.log
 ```
 
-## Codex Install Story
+## Install Notes
 
-This repository is also shaped as a Codex-installable package. The plugin manifest lives at `.codex-plugin/plugin.json`, and the bundled `install-ccc` skill points Codex at the supported repo scripts:
+Installation and release instructions live in [HOW_TO_INSTALL.md](/Users/roy.sadaka/Desktop/MachineLearning/research4/HOW_TO_INSTALL.md).
 
-- `scripts/run-local.sh`
-- `scripts/build-app.sh`
-- `scripts/package-release.sh`
-- `scripts/install-app.sh`
-
-That keeps the install story aligned with the actual source tree instead of adding duplicate scaffolding.
+That keeps the install story explicit without shipping a Codex-only wrapper that would remain installed after the app itself is set up.
 
 ## Contributing
 

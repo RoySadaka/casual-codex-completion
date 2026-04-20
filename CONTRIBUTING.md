@@ -1,6 +1,6 @@
 # Contributing
 
-CCC is intentionally kept small. Contributions are welcome, but keep the repo tight.
+Contributions are welcome. Keep the repo tight.
 
 ## Expectations
 
