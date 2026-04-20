@@ -4,8 +4,12 @@ import CoreGraphics
 import Foundation
 
 final class ScreenCaptureService {
+    func hasPermission() -> Bool {
+        CGPreflightScreenCaptureAccess()
+    }
+
     func requestPermission(prompt: Bool) -> Bool {
-        if CGPreflightScreenCaptureAccess() {
+        if hasPermission() {
             return true
         }
 

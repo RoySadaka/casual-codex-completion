@@ -26,6 +26,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        _ = coordinator.refreshPermissionsAndEventTap(promptForAccessibility: false)
+        updateUI()
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
@@ -35,8 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
     }
 
     @objc
-    private func promptAccessibilityPermission(_ sender: Any?) {
-        _ = coordinator.promptForAccessibilityPermission()
+    private func promptPermissions(_ sender: Any?) {
+        coordinator.promptForRequiredPermissions()
         updateUI()
     }
 
@@ -98,7 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         mainMenu.addItem(appMenuItem)
 
         let appMenu = NSMenu()
-        appMenu.addItem(NSMenuItem(title: "Prompt For Accessibility Permission", action: #selector(promptAccessibilityPermission(_:)), keyEquivalent: ""))
+        appMenu.addItem(NSMenuItem(title: "Prompt For Required Permissions", action: #selector(promptPermissions(_:)), keyEquivalent: ""))
         appMenu.addItem(NSMenuItem(title: "Dismiss Suggestion", action: #selector(hideSuggestion(_:)), keyEquivalent: ""))
         appMenu.addItem(.separator())
         appMenu.addItem(NSMenuItem(title: "Quit CCC", action: #selector(quit(_:)), keyEquivalent: "q"))
@@ -246,7 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
 
         let accessibilityButton = CCCButton(title: "Permissions")
         accessibilityButton.target = self
-        accessibilityButton.action = #selector(promptAccessibilityPermission(_:))
+        accessibilityButton.action = #selector(promptPermissions(_:))
         self.accessibilityButton = accessibilityButton
 
         let resetButton = CCCButton(title: "Reset Codex Session")
@@ -345,7 +350,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
     private func updateUI() {
         let sleeping = coordinator.isSleeping
         let screenshotEnabled = coordinator.isScreenshotContextEnabled
-        let hasAccessibilityPermission = coordinator.hasAccessibilityPermission
+        let hasScreenCapturePermission = coordinator.hasScreenCapturePermission
+        let hasRequiredPermissions = coordinator.hasRequiredPermissions
         let devModeEnabled = configuredDevMode()
 
         engineRow?.update(
@@ -354,8 +360,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         )
 
         visionRow?.update(
-            value: screenshotEnabled ? "On" : "Off",
-            tone: screenshotEnabled ? .blue : .neutral
+            value: screenshotEnabled ? (hasScreenCapturePermission ? "On" : "Blocked") : "Off",
+            tone: screenshotEnabled ? (hasScreenCapturePermission ? .blue : .danger) : .neutral
         )
 
         sleepButton?.title = sleeping ? "Wake" : "Sleep"
@@ -366,7 +372,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         screenshotButton?.isEnabled = !sleeping
 
         accessibilityButton?.title = "Permissions"
-        accessibilityButton?.tone = hasAccessibilityPermission ? .success : .danger
+        accessibilityButton?.tone = hasRequiredPermissions ? .success : .danger
 
         resetButton?.title = "Reset Codex Session"
         resetButton?.tone = .normal
@@ -637,6 +643,7 @@ private final class CCCStatusPillView: NSView {
     enum Tone {
         case green
         case blue
+        case danger
         case neutral
     }
 
@@ -686,6 +693,10 @@ private final class CCCStatusPillView: NSView {
             fillColor = NSColor.systemBlue.withAlphaComponent(0.14)
             textColor = NSColor.systemBlue
             borderColor = NSColor.systemBlue.withAlphaComponent(0.18)
+        case .danger:
+            fillColor = NSColor.systemRed.withAlphaComponent(0.14)
+            textColor = NSColor.systemRed
+            borderColor = NSColor.systemRed.withAlphaComponent(0.18)
         case .neutral:
             fillColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.10)
             textColor = .secondaryLabelColor

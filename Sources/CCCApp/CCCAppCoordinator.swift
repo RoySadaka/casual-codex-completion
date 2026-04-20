@@ -11,6 +11,7 @@ final class CCCAppCoordinator {
     private let inputInjector = InputInjector()
     private let overlay = OverlayWindowController()
     private let completionEngine = CompositeCompletionEngine()
+    private let screenCaptureService = ScreenCaptureService()
     private lazy var keyEventTap = KeyEventTap { [weak self] action in
         guard let self else { return false }
 
@@ -46,12 +47,14 @@ final class CCCAppCoordinator {
 
     func start() {
         AppLogger.info("Coordinator starting")
-        _ = promptForAccessibilityPermission()
+        _ = refreshPermissionsAndEventTap(promptForAccessibility: true)
         completionEngine.start()
         AppLogger.info("Typing monitor enabled. InvocationMode=explicit")
         keyEventTap.setTripleCTriggerEnabled(!sleeping)
-        keyEventTap.setScreenshotContextEnabled(screenshotContextEnabled)
-        keyEventTap.start()
+        keyEventTap.setScreenshotContextEnabled(
+            screenshotContextEnabled,
+            promptForPermission: screenshotContextEnabled
+        )
     }
 
     var isSleeping: Bool {
@@ -66,10 +69,34 @@ final class CCCAppCoordinator {
         accessibilityService.hasAccessibilityPermission()
     }
 
+    var hasScreenCapturePermission: Bool {
+        screenCaptureService.hasPermission()
+    }
+
+    var hasRequiredPermissions: Bool {
+        hasAccessibilityPermission && (!screenshotContextEnabled || hasScreenCapturePermission)
+    }
+
     @discardableResult
     func promptForAccessibilityPermission() -> Bool {
-        let granted = accessibilityService.requestAccessibilityPermission(prompt: true)
+        refreshPermissionsAndEventTap(promptForAccessibility: true)
+    }
+
+    func promptForRequiredPermissions() {
+        _ = refreshPermissionsAndEventTap(promptForAccessibility: true)
+        guard screenshotContextEnabled else {
+            return
+        }
+
+        let granted = screenCaptureService.requestPermission(prompt: true)
+        AppLogger.info("Screen capture permission status: \(granted)")
+    }
+
+    @discardableResult
+    func refreshPermissionsAndEventTap(promptForAccessibility: Bool) -> Bool {
+        let granted = accessibilityService.requestAccessibilityPermission(prompt: promptForAccessibility)
         AppLogger.info("Accessibility permission status: \(granted)")
+        keyEventTap.start()
         return granted
     }
 
@@ -439,14 +466,24 @@ final class CCCAppCoordinator {
         }
 
         AppLogger.info("Attempting to insert suggestion: \(visibleSuggestion.suggestion)")
-        let inserted = inputInjector.insertUsingPasteboard(
-            visibleSuggestion.suggestion,
-            targetPID: targetPID
-        )
+        let inserted: Bool
+        if let focusedContext = accessibilityService.focusedTextContext(),
+           focusedContext.appPID == targetPID,
+           accessibilityService.insertCompletion(visibleSuggestion.suggestion, into: focusedContext) {
+            AppLogger.info("Suggestion inserted successfully via accessibility")
+            inserted = true
+        } else {
+            inserted = inputInjector.insertUsingPasteboard(
+                visibleSuggestion.suggestion,
+                targetPID: targetPID
+            )
+        }
 
         if inserted {
             composeBuffer = String((composeBuffer + visibleSuggestion.suggestion).suffix(1200))
-            AppLogger.info("Suggestion inserted successfully via paste fallback")
+            if visibleSuggestion.context.source == .accessibility {
+                AppLogger.info("Suggestion accepted with AX-aware context")
+            }
             completionEngine.recordFeedback(.approved)
             dismissSuggestion()
         } else {
