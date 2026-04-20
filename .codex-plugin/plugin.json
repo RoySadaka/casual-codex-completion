@@ -1,0 +1,27 @@
+{
+  "name": "ccc",
+  "version": "0.1.0",
+  "description": "Open-source macOS Codex completion utility with build and install workflows.",
+  "author": {
+    "name": "Roy Sadaka",
+    "url": "https://github.com/RoySadaka"
+  },
+  "license": "MIT",
+  "keywords": ["macos", "codex", "swift", "completion"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "CCC",
+    "shortDescription": "Build and install the CCC macOS app.",
+    "longDescription": "Adds Codex-native workflows for building, packaging, and installing the open-source CCC macOS utility from this repository.",
+    "developerName": "Roy Sadaka",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Write"],
+    "websiteURL": "https://github.com/RoySadaka",
+    "defaultPrompt": [
+      "Install CCC from this repo.",
+      "Build a release zip for CCC.",
+      "Update my local CCC app."
+    ],
+    "brandColor": "#3276D9"
+  }
+}

@@ -1,0 +1,8 @@
+# Copy this file to `.local/config.toml` for local development if needed.
+# The launch scripts create that file automatically on first run.
+
+codex_cli_path = "/Applications/Codex.app/Contents/Resources/codex"
+model = "gpt-5.4"
+# reasoning_effort = "minimal"
+# user_name = "Your Name"
+dev_mode = false
