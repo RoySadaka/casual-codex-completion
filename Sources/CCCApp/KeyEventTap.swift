@@ -43,6 +43,10 @@ final class KeyEventTap {
         self.handler = handler
     }
 
+    var isActive: Bool {
+        eventTap != nil
+    }
+
     func start() {
         guard eventTap == nil else { return }
 

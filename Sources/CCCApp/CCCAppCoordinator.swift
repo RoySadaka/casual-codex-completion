@@ -1,6 +1,45 @@
 import AppKit
 import Foundation
 
+enum CCCPermissionRequirement {
+    case accessibility
+    case inputMonitoring
+    case screenRecording
+
+    var title: String {
+        switch self {
+        case .accessibility:
+            return "Accessibility"
+        case .inputMonitoring:
+            return "Input Monitoring"
+        case .screenRecording:
+            return "Screen Recording"
+        }
+    }
+
+    var details: String {
+        switch self {
+        case .accessibility:
+            return "Lets CCC inspect and edit the focused text field."
+        case .inputMonitoring:
+            return "Lets CCC listen for ccc, Tab, Shift-Tab, and Escape while you type."
+        case .screenRecording:
+            return "Lets CCC capture screenshots when Screenshot mode is enabled."
+        }
+    }
+
+    var settingsURL: URL? {
+        switch self {
+        case .accessibility:
+            return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        case .inputMonitoring:
+            return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+        case .screenRecording:
+            return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        }
+    }
+}
+
 final class CCCAppCoordinator {
     private enum SleepChangeSource: String {
         case manual = "manual"
@@ -73,8 +112,30 @@ final class CCCAppCoordinator {
         screenCaptureService.hasPermission()
     }
 
+    var hasInputMonitoringPermission: Bool {
+        keyEventTap.isActive
+    }
+
+    var missingPermissions: [CCCPermissionRequirement] {
+        var missing = [CCCPermissionRequirement]()
+
+        if !hasAccessibilityPermission {
+            missing.append(.accessibility)
+        }
+
+        if !hasInputMonitoringPermission {
+            missing.append(.inputMonitoring)
+        }
+
+        if screenshotContextEnabled && !hasScreenCapturePermission {
+            missing.append(.screenRecording)
+        }
+
+        return missing
+    }
+
     var hasRequiredPermissions: Bool {
-        hasAccessibilityPermission && (!screenshotContextEnabled || hasScreenCapturePermission)
+        missingPermissions.isEmpty
     }
 
     @discardableResult

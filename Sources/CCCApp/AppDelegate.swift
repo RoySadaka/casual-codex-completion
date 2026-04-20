@@ -43,6 +43,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
     private func promptPermissions(_ sender: Any?) {
         coordinator.promptForRequiredPermissions()
         updateUI()
+
+        let missingPermissions = coordinator.missingPermissions
+        guard !missingPermissions.isEmpty else {
+            return
+        }
+
+        presentPermissionHelper(for: missingPermissions)
     }
 
     @objc
@@ -423,6 +430,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
 
     private func configuredDevMode() -> Bool {
         CCCConfig.requiredBoolValue(forKey: devModeKey)
+    }
+
+    private func presentPermissionHelper(for missingPermissions: [CCCPermissionRequirement]) {
+        let alert = NSAlert()
+        let nextPermission = missingPermissions[0]
+        alert.messageText = "CCC still needs permission"
+        alert.informativeText = permissionHelperMessage(for: missingPermissions)
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Open \(nextPermission.title)")
+        alert.addButton(withTitle: "Reveal CCC.app")
+        alert.addButton(withTitle: "Not Now")
+
+        if let window {
+            alert.beginSheetModal(for: window) { [weak self] response in
+                self?.handlePermissionHelperResponse(
+                    response,
+                    nextPermission: nextPermission
+                )
+            }
+        } else {
+            let response = alert.runModal()
+            handlePermissionHelperResponse(response, nextPermission: nextPermission)
+        }
+    }
+
+    private func handlePermissionHelperResponse(
+        _ response: NSApplication.ModalResponse,
+        nextPermission: CCCPermissionRequirement
+    ) {
+        switch response {
+        case .alertFirstButtonReturn:
+            openSettings(for: nextPermission)
+        case .alertSecondButtonReturn:
+            revealAppInFinder()
+        default:
+            break
+        }
+    }
+
+    private func permissionHelperMessage(for missingPermissions: [CCCPermissionRequirement]) -> String {
+        let bulletLines = missingPermissions.map { permission in
+            "• \(permission.title): \(permission.details)"
+        }
+        let bulletBlock = bulletLines.joined(separator: "\n")
+
+        return """
+        Missing right now:
+        \(bulletBlock)
+
+        Use Open Settings to jump to the next missing permission.
+        Use Reveal CCC.app if the Settings page shows a + button and you need to choose the exact app bundle.
+        """
+    }
+
+    private func openSettings(for permission: CCCPermissionRequirement) {
+        guard let url = permission.settingsURL else {
+            return
+        }
+
+        NSWorkspace.shared.open(url)
+    }
+
+    private func revealAppInFinder() {
+        NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
     }
 
     private func makeLabel(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
