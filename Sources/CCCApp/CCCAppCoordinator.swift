@@ -46,12 +46,11 @@ final class CCCAppCoordinator {
 
     func start() {
         AppLogger.info("Coordinator starting")
-        _ = promptForAccessibilityPermission()
+        _ = refreshPermissionsAndEventTap(promptForAccessibility: true)
         completionEngine.start()
         AppLogger.info("Typing monitor enabled. InvocationMode=explicit")
         keyEventTap.setTripleCTriggerEnabled(!sleeping)
         keyEventTap.setScreenshotContextEnabled(screenshotContextEnabled)
-        keyEventTap.start()
     }
 
     var isSleeping: Bool {
@@ -68,8 +67,14 @@ final class CCCAppCoordinator {
 
     @discardableResult
     func promptForAccessibilityPermission() -> Bool {
-        let granted = accessibilityService.requestAccessibilityPermission(prompt: true)
+        refreshPermissionsAndEventTap(promptForAccessibility: true)
+    }
+
+    @discardableResult
+    func refreshPermissionsAndEventTap(promptForAccessibility: Bool) -> Bool {
+        let granted = accessibilityService.requestAccessibilityPermission(prompt: promptForAccessibility)
         AppLogger.info("Accessibility permission status: \(granted)")
+        keyEventTap.start()
         return granted
     }
 
