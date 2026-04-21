@@ -4,6 +4,9 @@ import Carbon.HIToolbox
 import Foundation
 
 final class InputInjector {
+    private let pasteSettleDelayMicros: useconds_t = 350_000
+    private let clipboardRestoreDelay: TimeInterval = 1.5
+
     func insertUsingPasteboard(_ text: String, targetPID: pid_t) -> Bool {
         guard !text.isEmpty else {
             AppLogger.error("Paste fallback failed because text was empty")
@@ -34,8 +37,8 @@ final class InputInjector {
         let didPaste = pasteWithAppleScript() || pasteWithCGEvents()
         AppLogger.info("Paste fallback result: \(didPaste)")
 
-        usleep(220_000)
-        restorePasteboardContents(previousContents)
+        usleep(pasteSettleDelayMicros)
+        schedulePasteboardRestore(previousContents, preservingInjectedText: text)
         return didPaste
     }
 
@@ -119,6 +122,28 @@ final class InputInjector {
                 item.setData(data, forType: type)
             }
             pasteboard.writeObjects([item])
+        }
+    }
+
+    private func schedulePasteboardRestore(
+        _ items: [[NSPasteboard.PasteboardType: Data]],
+        preservingInjectedText injectedText: String
+    ) {
+        guard !items.isEmpty else {
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + clipboardRestoreDelay) {
+            let pasteboard = NSPasteboard.general
+            let currentClipboardText = pasteboard.string(forType: .string)
+
+            guard currentClipboardText == injectedText else {
+                AppLogger.info("Skipping clipboard restore because clipboard contents changed after paste")
+                return
+            }
+
+            self.restorePasteboardContents(items)
+            AppLogger.info("Paste fallback restored previous clipboard contents")
         }
     }
 
