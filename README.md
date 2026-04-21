@@ -60,6 +60,10 @@ The supported build path is the repo scripts. `swift build` can work on machines
 
 All supported scripts share the same explicit minimum deployment target: macOS `13.0`.
 
+## Permissions In Action
+
+![CCC Permissions Flow](docs/readme-assets/permissions.gif)
+
 ## Local Development
 
 Run the app locally:
