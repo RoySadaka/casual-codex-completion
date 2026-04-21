@@ -164,7 +164,7 @@ private enum PromptRole {
     }
 
     private static func screenshotContextPrompt() -> String {
-        loadRequiredTemplate(.screenshotContext)
+        injectUserName(into: loadRequiredTemplate(.screenshotContext))
     }
 
     private static func userIdentityPrompt() -> String {
