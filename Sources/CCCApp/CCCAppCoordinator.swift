@@ -138,19 +138,26 @@ final class CCCAppCoordinator {
         missingPermissions.isEmpty
     }
 
+    var nextMissingPermission: CCCPermissionRequirement? {
+        missingPermissions.first
+    }
+
     @discardableResult
     func promptForAccessibilityPermission() -> Bool {
         refreshPermissionsAndEventTap(promptForAccessibility: true)
     }
 
-    func promptForRequiredPermissions() {
-        _ = refreshPermissionsAndEventTap(promptForAccessibility: true)
-        guard screenshotContextEnabled else {
-            return
+    func promptForPermission(_ permission: CCCPermissionRequirement) {
+        switch permission {
+        case .accessibility:
+            _ = refreshPermissionsAndEventTap(promptForAccessibility: true)
+        case .inputMonitoring:
+            AppLogger.info("Rechecking Input Monitoring permission via CGEvent tap start")
+            keyEventTap.start()
+        case .screenRecording:
+            let granted = screenCaptureService.requestPermission(prompt: true)
+            AppLogger.info("Screen capture permission status: \(granted)")
         }
-
-        let granted = screenCaptureService.requestPermission(prompt: true)
-        AppLogger.info("Screen capture permission status: \(granted)")
     }
 
     @discardableResult

@@ -41,11 +41,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
 
     @objc
     private func promptPermissions(_ sender: Any?) {
-        coordinator.promptForRequiredPermissions()
+        guard let nextPermission = coordinator.nextMissingPermission else {
+            updateUI()
+            return
+        }
+
+        coordinator.promptForPermission(nextPermission)
         updateUI()
 
         let missingPermissions = coordinator.missingPermissions
-        guard !missingPermissions.isEmpty else {
+        guard missingPermissions.contains(nextPermission) else {
             return
         }
 
