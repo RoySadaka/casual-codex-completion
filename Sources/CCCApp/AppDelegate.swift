@@ -18,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLogger.info("Application launched. Log file: \(AppLogger.logFileURL.path)")
-        NSApp.applicationIconImage = makeDockIcon()
+        NSApp.applicationIconImage = bundledApplicationIcon() ?? makeDockIcon()
         installMainMenu()
         installWindow()
         coordinator.start()
@@ -92,6 +92,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
     }
 
     @objc
+    private func showAboutPanel(_ sender: Any?) {
+        let marketingVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+        let buildVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+        NSApp.orderFrontStandardAboutPanel(
+            options: [
+                .applicationName: "CCC",
+                .applicationVersion: marketingVersion,
+                .version: buildVersion,
+                .credits: NSAttributedString(string: "Casual-Codex-Completion\nBy Roy Sadaka")
+            ]
+        )
+    }
+
+    @objc
     private func userNameFieldChanged(_ sender: NSTextField) {
         persistUserName(from: sender)
     }
@@ -115,6 +129,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         mainMenu.addItem(appMenuItem)
 
         let appMenu = NSMenu()
+        appMenu.addItem(NSMenuItem(title: "About CCC", action: #selector(showAboutPanel(_:)), keyEquivalent: ""))
+        appMenu.addItem(.separator())
         appMenu.addItem(NSMenuItem(title: "Prompt For Required Permissions", action: #selector(promptPermissions(_:)), keyEquivalent: ""))
         appMenu.addItem(NSMenuItem(title: "Dismiss Suggestion", action: #selector(hideSuggestion(_:)), keyEquivalent: ""))
         appMenu.addItem(.separator())
@@ -512,6 +528,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         label.isSelectable = false
         label.lineBreakMode = .byWordWrapping
         return label
+    }
+
+    private func bundledApplicationIcon() -> NSImage? {
+        if let icon = NSImage(named: "AppIcon") {
+            return icon
+        }
+
+        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: iconURL) {
+            return icon
+        }
+
+        if let projectRoot = ProcessInfo.processInfo.environment["CCC_PROJECT_ROOT"] {
+            let iconURL = URL(fileURLWithPath: projectRoot, isDirectory: true)
+                .appendingPathComponent("Resources/AppIcon.icns")
+            if let icon = NSImage(contentsOf: iconURL) {
+                return icon
+            }
+        }
+
+        return nil
     }
 
     private func makeDockIcon() -> NSImage {

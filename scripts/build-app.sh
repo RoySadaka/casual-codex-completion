@@ -37,6 +37,7 @@ swiftc \
 
 ccc_info "Copying bundle resources"
 cp "$ROOT_DIR/Support/Info.plist" "$APP_DIR/Contents/Info.plist"
+cp "$ROOT_DIR/Resources/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
 rsync -a "$ROOT_DIR/Resources/Prompts/" "$RESOURCES_DIR/Prompts/"
 
 if command -v codesign >/dev/null 2>&1; then
