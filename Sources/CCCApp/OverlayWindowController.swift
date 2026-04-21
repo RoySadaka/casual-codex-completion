@@ -6,8 +6,11 @@ final class OverlayWindowController {
     private let contentView: OverlayContentView
     private let suggestionLabel: NSTextField
     private let hintLabel: NSTextField
-    private var loadingTimer: Timer?
-    private var loadingFrameIndex = 0
+    private let loadingIndicator: LoadingSpinnerView
+    private let loadingLabel: NSTextField
+    private let loadingStack: NSStackView
+    private let suggestionTopConstraint: NSLayoutConstraint
+    private let suggestionCenterYConstraint: NSLayoutConstraint
 
     var isVisible: Bool {
         panel.isVisible
@@ -49,19 +52,52 @@ final class OverlayWindowController {
         hintLabel.setContentHuggingPriority(.required, for: .vertical)
         hintLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
+        loadingIndicator = LoadingSpinnerView(frame: NSRect(x: 0, y: 0, width: 14, height: 14))
+        loadingIndicator.translatesAutoresizingMaskIntoConstraints = false
+        loadingIndicator.setContentHuggingPriority(.required, for: .horizontal)
+        loadingIndicator.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        loadingLabel = NSTextField(labelWithString: "cccchecking")
+        loadingLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        loadingLabel.textColor = suggestionLabel.textColor
+        loadingLabel.lineBreakMode = .byClipping
+        loadingLabel.backgroundColor = .clear
+        loadingLabel.translatesAutoresizingMaskIntoConstraints = false
+        loadingLabel.setContentHuggingPriority(.required, for: .horizontal)
+        loadingLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        loadingStack = NSStackView(views: [loadingIndicator, loadingLabel])
+        loadingStack.translatesAutoresizingMaskIntoConstraints = false
+        loadingStack.orientation = .horizontal
+        loadingStack.alignment = .centerY
+        loadingStack.spacing = 8
+        loadingStack.isHidden = true
+
         contentView = OverlayContentView(frame: NSRect(x: 0, y: 0, width: 320, height: 72))
         contentView.addSubview(suggestionLabel)
         contentView.addSubview(hintLabel)
+        contentView.addSubview(loadingStack)
+
+        suggestionTopConstraint = suggestionLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14)
+        suggestionCenterYConstraint = suggestionLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
+        suggestionCenterYConstraint.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
             suggestionLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             suggestionLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            suggestionLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
+            suggestionTopConstraint,
 
             hintLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             hintLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -10),
             hintLabel.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 16),
-            hintLabel.topAnchor.constraint(greaterThanOrEqualTo: suggestionLabel.bottomAnchor, constant: 6)
+            hintLabel.topAnchor.constraint(greaterThanOrEqualTo: suggestionLabel.bottomAnchor, constant: 6),
+
+            loadingStack.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            loadingStack.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            loadingStack.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 16),
+            loadingStack.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -16),
+            loadingIndicator.widthAnchor.constraint(equalToConstant: 14),
+            loadingIndicator.heightAnchor.constraint(equalToConstant: 14)
         ])
 
         panel = NSPanel(
@@ -82,18 +118,38 @@ final class OverlayWindowController {
 
     func show(suggestion: String, near accessibilityRect: CGRect) {
         stopLoadingAnimation()
-        show(message: suggestion, hint: "Tab to insert", near: accessibilityRect, animated: true, logFrame: true)
+        show(
+            message: suggestion,
+            hint: "Tab to insert",
+            near: accessibilityRect,
+            animated: true,
+            logFrame: true,
+            showsLoadingIndicator: false
+        )
     }
 
     func showStatus(message: String, near accessibilityRect: CGRect) {
         stopLoadingAnimation()
-        show(message: message, hint: nil, near: accessibilityRect, animated: true, logFrame: true)
+        show(
+            message: message,
+            hint: nil,
+            near: accessibilityRect,
+            animated: true,
+            logFrame: true,
+            showsLoadingIndicator: false
+        )
     }
 
     func showLoading(near accessibilityRect: CGRect) {
-        loadingFrameIndex = 0
-        show(message: loadingMessage(for: loadingFrameIndex), hint: nil, near: accessibilityRect, animated: true, logFrame: true)
-        startLoadingAnimation(near: accessibilityRect)
+        show(
+            message: loadingLabel.stringValue,
+            hint: nil,
+            near: accessibilityRect,
+            animated: true,
+            logFrame: true,
+            showsLoadingIndicator: true
+        )
+        startLoadingAnimation()
     }
 
     private func show(
@@ -101,13 +157,24 @@ final class OverlayWindowController {
         hint: String?,
         near accessibilityRect: CGRect,
         animated: Bool,
-        logFrame: Bool
+        logFrame: Bool,
+        showsLoadingIndicator: Bool
     ) {
-        hintLabel.isHidden = hint == nil
+        suggestionLabel.isHidden = showsLoadingIndicator
+        hintLabel.isHidden = hint == nil || showsLoadingIndicator
+        loadingStack.isHidden = !showsLoadingIndicator
         hintLabel.stringValue = hint ?? ""
         suggestionLabel.stringValue = message
+        loadingLabel.stringValue = message
+        suggestionTopConstraint.isActive = hint != nil
+        suggestionCenterYConstraint.isActive = hint == nil && !showsLoadingIndicator
         let frame = constrainedFrame(
-            preferredFrame(for: message, hint: hint, near: convertToAppKitCoordinates(accessibilityRect)),
+            preferredFrame(
+                for: message,
+                hint: hint,
+                near: convertToAppKitCoordinates(accessibilityRect),
+                showsLoadingIndicator: showsLoadingIndicator
+            ),
             near: convertToAppKitCoordinates(accessibilityRect)
         )
         if logFrame {
@@ -152,32 +219,12 @@ final class OverlayWindowController {
         contentView.layer?.transform = CATransform3DIdentity
     }
 
-    private func startLoadingAnimation(near accessibilityRect: CGRect) {
-        stopLoadingAnimation()
-
-        loadingTimer = Timer.scheduledTimer(withTimeInterval: 0.28, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.loadingFrameIndex = (self.loadingFrameIndex + 1) % 4
-            self.show(
-                message: self.loadingMessage(for: self.loadingFrameIndex),
-                hint: nil,
-                near: accessibilityRect,
-                animated: false,
-                logFrame: false
-            )
-        }
-        if let loadingTimer {
-            RunLoop.main.add(loadingTimer, forMode: .common)
-        }
+    private func startLoadingAnimation() {
+        loadingIndicator.startAnimating()
     }
 
     private func stopLoadingAnimation() {
-        loadingTimer?.invalidate()
-        loadingTimer = nil
-    }
-
-    private func loadingMessage(for frame: Int) -> String {
-        "cccchecking" + String(repeating: ".", count: frame)
+        loadingIndicator.stopAnimating()
     }
 
     private func animateAppearance() {
@@ -210,13 +257,19 @@ final class OverlayWindowController {
         contentView.layer?.add(fade, forKey: "overlay.fade")
     }
 
-    private func preferredFrame(for suggestion: String, hint: String?, near rect: CGRect) -> CGRect {
+    private func preferredFrame(
+        for suggestion: String,
+        hint: String?,
+        near rect: CGRect,
+        showsLoadingIndicator: Bool
+    ) -> CGRect {
         let targetFrame = screenFrame(containing: rect) ?? fallbackScreenFrame()
         let maxWidth = min(720 as CGFloat, max(260, targetFrame.width - 32))
         let minWidth: CGFloat = 220
         let horizontalPadding: CGFloat = 32
         let maxContentWidth = maxWidth - horizontalPadding
-        let naturalSuggestionRect = suggestionLabel.attributedStringValue.boundingRect(
+        let messageField = showsLoadingIndicator ? loadingLabel : suggestionLabel
+        let naturalSuggestionRect = messageField.attributedStringValue.boundingRect(
             with: NSSize(width: 10_000, height: 260),
             options: [.usesLineFragmentOrigin, .usesFontLeading]
         )
@@ -235,12 +288,16 @@ final class OverlayWindowController {
             ? maxContentWidth
             : max(ceil(max(naturalSuggestionRect.width, hintRect.width)), minWidth - horizontalPadding)
         let suggestionRect = shouldWrap
-            ? suggestionLabel.attributedStringValue.boundingRect(
+            ? messageField.attributedStringValue.boundingRect(
                 with: NSSize(width: contentWidth, height: 260),
                 options: [.usesLineFragmentOrigin, .usesFontLeading]
             )
             : naturalSuggestionRect
-        let width = max(minWidth, min(maxWidth, ceil(max(contentWidth, hintRect.width)) + horizontalPadding))
+        let spinnerWidth: CGFloat = showsLoadingIndicator ? 22 : 0
+        let width = max(
+            minWidth,
+            min(maxWidth, ceil(max(contentWidth + spinnerWidth, hintRect.width)) + horizontalPadding)
+        )
         let hintSpacing: CGFloat = hintRect == .zero ? 0 : 6
         let bottomPadding: CGFloat = hintRect == .zero ? 14 : 10
         let height = max(58, ceil(suggestionRect.height) + ceil(hintRect.height) + 14 + hintSpacing + bottomPadding)
@@ -297,6 +354,66 @@ final class OverlayWindowController {
         )
 
         return CGRect(x: floor(x), y: floor(y), width: floor(width), height: floor(height))
+    }
+}
+
+private final class LoadingSpinnerView: NSView {
+    private let spinnerLayer = CAShapeLayer()
+    private let animationKey = "ccc.spinner.rotation"
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+
+        spinnerLayer.fillColor = nil
+        spinnerLayer.lineCap = .round
+        spinnerLayer.lineWidth = 2
+        spinnerLayer.strokeColor = NSColor(
+            calibratedRed: 0.16,
+            green: 0.33,
+            blue: 0.62,
+            alpha: 1.0
+        ).cgColor
+        spinnerLayer.strokeStart = 0.14
+        spinnerLayer.strokeEnd = 0.84
+        layer?.addSublayer(spinnerLayer)
+        isHidden = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+        super.layout()
+        spinnerLayer.frame = bounds
+        spinnerLayer.path = CGPath(
+            ellipseIn: bounds.insetBy(dx: 2, dy: 2),
+            transform: nil
+        )
+    }
+
+    func startAnimating() {
+        isHidden = false
+
+        guard spinnerLayer.animation(forKey: animationKey) == nil else {
+            return
+        }
+
+        let rotation = CABasicAnimation(keyPath: "transform.rotation.z")
+        rotation.fromValue = 0
+        rotation.toValue = Double.pi * 2
+        rotation.duration = 0.85
+        rotation.repeatCount = .infinity
+        rotation.timingFunction = CAMediaTimingFunction(name: .linear)
+        spinnerLayer.add(rotation, forKey: animationKey)
+    }
+
+    func stopAnimating() {
+        spinnerLayer.removeAnimation(forKey: animationKey)
+        isHidden = true
     }
 }
 
