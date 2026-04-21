@@ -116,10 +116,15 @@ Supported keys:
 ```toml
 codex_cli_path = "/Applications/Codex.app/Contents/Resources/codex"
 model = "gpt-5.4"
+dev_mode = false
+```
+
+Optional overrides:
+
+```toml
 # reasoning_effort = "medium"
 # user_name = "Your Name"
 # prompt_prefix_char_limit = 4096
-dev_mode = false
 ```
 
 Defaults:
