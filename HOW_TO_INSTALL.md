@@ -68,7 +68,7 @@ dev_mode = false
 Optional:
 
 ```toml
-# reasoning_effort = "minimal"
+# reasoning_effort = "medium"
 # user_name = "Your Name"
 # prompt_prefix_char_limit = 4096
 ```

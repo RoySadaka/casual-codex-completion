@@ -184,6 +184,8 @@ enum CCCConfig {
             return FileManager.default.isExecutableFile(atPath: defaultPath) ? defaultPath : nil
         case "model":
             return "gpt-5.4"
+        case "reasoning_effort":
+            return "medium"
         default:
             return nil
         }
