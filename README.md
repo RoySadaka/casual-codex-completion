@@ -39,7 +39,7 @@ Repo layout:
 - Runs as a lightweight macOS app with a small control window.
 - Watches typing through a global event tap while the app is active.
 - Requests a completion from the local Codex CLI when you hit `ccc`.
-- Shows a floating suggestion near the caret when possible, or near the mouse as fallback.
+- Shows a floating suggestion.
 - Accepts the suggestion into the active app through paste-based injection.
 
 ## Shortcuts
@@ -140,11 +140,11 @@ On first run, macOS may ask for:
 
 Why they matter:
 
-- Accessibility: required for reliable cross-app text insertion, text context probing, and better caret anchoring.
+- Accessibility: required for text context probing and general cross-app integration.
 - Input Monitoring: required to watch global key events so `ccc`, `Tab`, `Shift+Tab`, and `Escape` work across apps.
 - Screen Recording: only needed when screenshot context is enabled, so Codex can use the current window as extra context.
 
-Without these permissions, completion capture, anchoring, and screenshot-assisted context will degrade or fail.
+Without these permissions, completion capture and screenshot-assisted context will degrade or fail.
 
 ## Logs
 
