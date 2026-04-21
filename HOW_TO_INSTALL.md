@@ -70,6 +70,7 @@ Optional:
 ```toml
 # reasoning_effort = "minimal"
 # user_name = "Your Name"
+# prompt_prefix_char_limit = 4096
 ```
 
 ## Permissions

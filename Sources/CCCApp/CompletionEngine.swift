@@ -81,7 +81,7 @@ private enum PromptRole {
     }
 
     static func continuationPrompt(for context: FocusedTextContext) -> String {
-        let trimmedPrefix = String(context.prefix.suffix(600))
+        let trimmedPrefix = String(context.prefix.suffix(CCCConfig.promptPrefixCharacterLimit))
         let template = injectUserName(into: loadRequiredTemplate(.continuation))
         guard template.contains(placeholder) else {
             fatalError("Required continuation prompt is missing placeholder \(placeholder)")
@@ -699,7 +699,7 @@ final class CodexCLICompletionEngine: CompletionEngine {
     }
 
     private func prompt(for context: FocusedTextContext) -> String {
-        AppLogger.info("Codex prefix payload: <<<\(String(context.prefix.suffix(600)).logEscaped)>>>")
+        AppLogger.info("Codex prefix payload: <<<\(String(context.prefix.suffix(CCCConfig.promptPrefixCharacterLimit)).logEscaped)>>>")
         return PromptRole.continuationPrompt(for: context)
     }
 

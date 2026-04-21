@@ -14,7 +14,15 @@ The core idea is simple:
 - stay inside the app you are already using
 - get better as Codex gets better 🫡
 
+## CCC In Action
+
+![CCC In Action](docs/readme-assets/ccc-in-action.gif)
+
 CCC is built on top of Codex. CCC does not need to reinvent the brain. When Codex improves, CCC improves with it.
+
+## Future
+
+CCC might evolve from Casual-Codex-Completion to Casual-Codex-ComputerUse, going beyond text completion into broader on-screen assistance and action 🛸
 
 Over time, CCC should get more personal. Through Codex Chronicle, it can build a better sense of how you write, what you care about, and how to help in a way that feels more like your own flow 🧠
 
@@ -106,6 +114,7 @@ codex_cli_path = "/Applications/Codex.app/Contents/Resources/codex"
 model = "gpt-5.4"
 # reasoning_effort = "minimal"
 # user_name = "Your Name"
+# prompt_prefix_char_limit = 4096
 dev_mode = false
 ```
 
@@ -113,6 +122,7 @@ Defaults:
 
 - `codex_cli_path` defaults to the standard Codex desktop bundle path when present
 - `model` defaults to `gpt-5.4`
+- `prompt_prefix_char_limit` defaults to `4096`
 - `dev_mode` defaults to `false`
 
 ## Permissions

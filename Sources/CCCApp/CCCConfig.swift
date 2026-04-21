@@ -1,6 +1,8 @@
 import Foundation
 
 enum CCCConfig {
+    static let defaultPromptPrefixCharacterLimit = 4096
+
     static func stringValue(forKey key: String) -> String? {
         guard var value = rawValue(forKey: key) ?? defaultStringValue(forKey: key) else {
             return nil
@@ -48,6 +50,31 @@ enum CCCConfig {
     static func requiredBoolValue(forKey key: String) -> Bool {
         guard let value = boolValue(forKey: key) else {
             fatalError("Missing or invalid boolean config key '\(key)' in \(configPathDescription())")
+        }
+
+        return value
+    }
+
+    static func intValue(forKey key: String) -> Int? {
+        let configuredValue: String?
+        if let configured = rawValue(forKey: key) {
+            configuredValue = configured
+        } else if let defaultValue = defaultIntValue(forKey: key) {
+            configuredValue = String(defaultValue)
+        } else {
+            configuredValue = nil
+        }
+
+        guard let configuredValue else {
+            return nil
+        }
+
+        return Int(configuredValue.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    static var promptPrefixCharacterLimit: Int {
+        guard let value = intValue(forKey: "prompt_prefix_char_limit"), value > 0 else {
+            return defaultPromptPrefixCharacterLimit
         }
 
         return value
@@ -166,6 +193,15 @@ enum CCCConfig {
         switch key {
         case "dev_mode":
             return false
+        default:
+            return nil
+        }
+    }
+
+    private static func defaultIntValue(forKey key: String) -> Int? {
+        switch key {
+        case "prompt_prefix_char_limit":
+            return defaultPromptPrefixCharacterLimit
         default:
             return nil
         }

@@ -72,7 +72,6 @@ final class CCCAppCoordinator {
 
     private var pendingRequestID = UUID()
     private var visibleSuggestion: VisibleSuggestion?
-    private var composeBuffer = ""
     private var composeTargetPID: pid_t?
     private var composeTargetAppName = "unknown"
     private var suggestionWorkItem: DispatchWorkItem?
@@ -417,25 +416,23 @@ final class CCCAppCoordinator {
 
         let context: FocusedTextContext
         if let explicitPrefixOverride {
-            let clippedPrefix = String(explicitPrefixOverride.suffix(600))
+            let clippedPrefix = String(explicitPrefixOverride.suffix(CCCConfig.promptPrefixCharacterLimit))
             context = accessibilityService.liveFieldProbeContext(
                 for: clippedPrefix,
                 targetPID: targetPID,
                 targetAppName: targetAppName,
                 screenshotURL: explicitScreenshotURL
             )
-            composeBuffer = String(clippedPrefix.suffix(1200))
             self.explicitPrefixOverride = nil
             self.explicitScreenshotURL = nil
         } else if let probedPrefix = inputInjector.capturePrefixUntilCursor(targetPID: targetPID) {
-            let clippedPrefix = String(probedPrefix.suffix(600))
+            let clippedPrefix = String(probedPrefix.suffix(CCCConfig.promptPrefixCharacterLimit))
             context = accessibilityService.liveFieldProbeContext(
                 for: clippedPrefix,
                 targetPID: targetPID,
                 targetAppName: targetAppName,
                 screenshotURL: nil
             )
-            composeBuffer = String(clippedPrefix.suffix(1200))
         } else {
             explicitPrefixOverride = nil
             explicitScreenshotURL = nil
@@ -548,7 +545,6 @@ final class CCCAppCoordinator {
         }
 
         if inserted {
-            composeBuffer = String((composeBuffer + visibleSuggestion.suggestion).suffix(1200))
             if visibleSuggestion.context.source == .accessibility {
                 AppLogger.info("Suggestion accepted with AX-aware context")
             }
@@ -560,11 +556,6 @@ final class CCCAppCoordinator {
         }
 
         return inserted
-    }
-
-    private func initialComposeBuffer(for targetPID: pid_t) -> String {
-        _ = targetPID
-        return ""
     }
 
     private func noteUserEdit() {
@@ -620,7 +611,7 @@ final class CCCAppCoordinator {
             return
         }
 
-        composeBuffer = seedFromAccessibility ? initialComposeBuffer(for: frontmostApp.pid) : ""
+        _ = seedFromAccessibility
         pendingRequestID = UUID()
         userEditRevision = 0
         suggestionWorkItem?.cancel()
@@ -628,9 +619,7 @@ final class CCCAppCoordinator {
         isCompletionRequestInFlight = false
         needsSuggestionRefreshAfterCurrentRequest = false
 
-        AppLogger.info(
-            "Tracking armed for \(frontmostApp.name) pid=\(frontmostApp.pid) SeedLength=\((composeBuffer as NSString).length) InvocationMode=explicit"
-        )
+        AppLogger.info("Tracking armed for \(frontmostApp.name) pid=\(frontmostApp.pid) InvocationMode=explicit")
 
         dismissSuggestion()
     }
@@ -656,7 +645,6 @@ final class CCCAppCoordinator {
         pendingRequestID = UUID()
         needsSuggestionRefreshAfterCurrentRequest = false
         isCompletionRequestInFlight = false
-        composeBuffer = ""
         userEditRevision = 0
         composeTargetPID = nil
         composeTargetAppName = "unknown"
