@@ -531,23 +531,13 @@ final class CCCAppCoordinator {
         }
 
         AppLogger.info("Attempting to insert suggestion: \(visibleSuggestion.suggestion)")
-        let inserted: Bool
-        if let focusedContext = accessibilityService.focusedTextContext(),
-           focusedContext.appPID == targetPID,
-           accessibilityService.insertCompletion(visibleSuggestion.suggestion, into: focusedContext) {
-            AppLogger.info("Suggestion inserted successfully via accessibility")
-            inserted = true
-        } else {
-            inserted = inputInjector.insertUsingPasteboard(
-                visibleSuggestion.suggestion,
-                targetPID: targetPID
-            )
-        }
+        AppLogger.info("Using paste-only insertion mode")
+        let inserted = inputInjector.insertUsingPasteboard(
+            visibleSuggestion.suggestion,
+            targetPID: targetPID
+        )
 
         if inserted {
-            if visibleSuggestion.context.source == .accessibility {
-                AppLogger.info("Suggestion accepted with AX-aware context")
-            }
             completionEngine.recordFeedback(.approved)
             dismissSuggestion()
         } else {
