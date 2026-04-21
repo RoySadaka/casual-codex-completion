@@ -4,6 +4,9 @@ import CoreGraphics
 import Foundation
 
 final class ScreenCaptureService {
+    private let maxScreenshotLongEdgePixels = 1280
+    private let screenshotJPEGCompressionQuality: CGFloat = 0.88
+
     func hasPermission() -> Bool {
         CGPreflightScreenCaptureAccess()
     }
@@ -125,21 +128,25 @@ final class ScreenCaptureService {
     }
 
     private func persist(image: CGImage) -> URL? {
-        let bitmap = NSBitmapImageRep(cgImage: image)
-        guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
-            AppLogger.error("Failed to encode screenshot as PNG")
+        let preparedImage = resizedImageIfNeeded(image)
+        let bitmap = NSBitmapImageRep(cgImage: preparedImage)
+        guard let jpegData = bitmap.representation(
+            using: .jpeg,
+            properties: [.compressionFactor: screenshotJPEGCompressionQuality]
+        ) else {
+            AppLogger.error("Failed to encode screenshot as JPEG")
             return nil
         }
 
         let screenshotsDirectory = FileManager.default.temporaryDirectory
         let url = screenshotsDirectory
             .appendingPathComponent("ccc-screenshot-\(UUID().uuidString)")
-            .appendingPathExtension("png")
+            .appendingPathExtension("jpg")
 
         do {
-            try pngData.write(to: url, options: .atomic)
+            try jpegData.write(to: url, options: .atomic)
             if CCCConfig.requiredBoolValue(forKey: "dev_mode") {
-                persistDesktopCopy(pngData: pngData)
+                persistDesktopCopy(jpegData: jpegData)
             }
             return url
         } catch {
@@ -148,16 +155,55 @@ final class ScreenCaptureService {
         }
     }
 
-    private func persistDesktopCopy(pngData: Data) {
+    private func resizedImageIfNeeded(_ image: CGImage) -> CGImage {
+        let width = image.width
+        let height = image.height
+        let longEdge = max(width, height)
+
+        guard longEdge > maxScreenshotLongEdgePixels else {
+            return image
+        }
+
+        let scale = CGFloat(maxScreenshotLongEdgePixels) / CGFloat(longEdge)
+        let targetWidth = max(1, Int((CGFloat(width) * scale).rounded()))
+        let targetHeight = max(1, Int((CGFloat(height) * scale).rounded()))
+
+        guard let colorSpace = image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil,
+                  width: targetWidth,
+                  height: targetHeight,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: colorSpace,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else {
+            AppLogger.error("Failed to create resize context for screenshot; using original image")
+            return image
+        }
+
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
+
+        guard let resizedImage = context.makeImage() else {
+            AppLogger.error("Failed to resize screenshot image; using original image")
+            return image
+        }
+
+        AppLogger.info("Resized screenshot from \(width)x\(height) to \(targetWidth)x\(targetHeight)")
+        return resizedImage
+    }
+
+    private func persistDesktopCopy(jpegData: Data) {
         let desktopDirectory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Desktop", isDirectory: true)
         let timestamp = desktopTimestamp()
         let desktopURL = desktopDirectory
             .appendingPathComponent("ccc-screenshot-\(timestamp)-\(UUID().uuidString.prefix(6))")
-            .appendingPathExtension("png")
+            .appendingPathExtension("jpg")
 
         do {
-            try pngData.write(to: desktopURL, options: .atomic)
+            try jpegData.write(to: desktopURL, options: .atomic)
             AppLogger.info("Saved dev-mode desktop screenshot copy at \(desktopURL.path)")
         } catch {
             AppLogger.error("Failed to save dev-mode desktop screenshot copy: \(error.localizedDescription)")

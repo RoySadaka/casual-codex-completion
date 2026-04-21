@@ -21,6 +21,9 @@ struct FocusedTextContext {
 }
 
 final class AccessibilityTextService {
+    private let axWriteVerificationAttempts = 4
+    private let axWriteVerificationDelayMicros: useconds_t = 40_000
+
     func hasAccessibilityPermission() -> Bool {
         requestAccessibilityPermission(prompt: false)
     }
@@ -157,6 +160,11 @@ final class AccessibilityTextService {
             return false
         }
 
+        guard verifyAXTextWrite(expectedText: newText, on: element) else {
+            AppLogger.error("AX value write did not appear in the focused element after verification")
+            return false
+        }
+
         var newSelection = CFRange(
             location: context.selectedRange.location + (completion as NSString).length,
             length: 0
@@ -177,6 +185,24 @@ final class AccessibilityTextService {
         }
 
         return setSelectionResult == .success
+    }
+
+    private func verifyAXTextWrite(expectedText: String, on element: AXUIElement) -> Bool {
+        for attempt in 0 ..< axWriteVerificationAttempts {
+            if let actualText = copyAttribute(kAXValueAttribute, on: element) as? String,
+               actualText == expectedText {
+                if attempt > 0 {
+                    AppLogger.info("AX value write verified after retry \(attempt)")
+                }
+                return true
+            }
+
+            if attempt < axWriteVerificationAttempts - 1 {
+                usleep(axWriteVerificationDelayMicros)
+            }
+        }
+
+        return false
     }
 
     private func selectedRange(on element: AXUIElement) -> CFRange? {
