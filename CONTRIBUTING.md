@@ -22,4 +22,11 @@ scripts/build-app.sh
 scripts/package-release.sh
 ```
 
+For install verification:
+
+```bash
+scripts/install-app.sh
+scripts/uninstall-app.sh
+```
+
 If `swift build` is broken because the active Apple developer directory points at Command Line Tools only, use the scripts above or switch to a full Xcode installation with `xcode-select`.

@@ -50,6 +50,8 @@ Repo layout:
 
 The supported build path is the repo scripts. `swift build` can work on machines with a full Xcode setup, but some Command Line Tools only installs fail to resolve the required macOS platform path.
 
+All supported scripts share the same explicit minimum deployment target: macOS `13.0`.
+
 ## Local Development
 
 Run the app locally:
@@ -80,6 +82,12 @@ Install the built app into `~/Applications`:
 
 ```bash
 scripts/install-app.sh
+```
+
+Remove the installed app and its user data:
+
+```bash
+scripts/uninstall-app.sh
 ```
 
 ## Runtime Config

@@ -12,8 +12,10 @@ scripts/install-app.sh
 
 That script will:
 
+- run preflight checks for `swiftc`, the macOS SDK, and required tooling
 - build `dist/CCC.app`
 - copy it into `~/Applications/CCC.app`
+- run a post-install smoke test against the installed bundle
 
 ## Create A Release Artifact
 
@@ -26,6 +28,14 @@ scripts/package-release.sh
 Output:
 
 - `dist/CCC-macos.zip`
+
+## Uninstall
+
+Remove the installed app, app support files, and logs:
+
+```bash
+scripts/uninstall-app.sh
+```
 
 ## Run During Development
 
