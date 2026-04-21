@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 
 final class OverlayWindowController {
+    private let loadingMessage = "cccchecking"
     private let panel: NSPanel
     private let contentView: OverlayContentView
     private let suggestionLabel: NSTextField
@@ -57,7 +58,7 @@ final class OverlayWindowController {
         loadingIndicator.setContentHuggingPriority(.required, for: .horizontal)
         loadingIndicator.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        loadingLabel = NSTextField(labelWithString: "cccchecking")
+        loadingLabel = NSTextField(labelWithString: loadingMessage)
         loadingLabel.font = .systemFont(ofSize: 15, weight: .semibold)
         loadingLabel.textColor = suggestionLabel.textColor
         loadingLabel.lineBreakMode = .byClipping
@@ -142,7 +143,7 @@ final class OverlayWindowController {
 
     func showLoading(near accessibilityRect: CGRect) {
         show(
-            message: loadingLabel.stringValue,
+            message: loadingMessage,
             hint: nil,
             near: accessibilityRect,
             animated: true,
@@ -165,7 +166,9 @@ final class OverlayWindowController {
         loadingStack.isHidden = !showsLoadingIndicator
         hintLabel.stringValue = hint ?? ""
         suggestionLabel.stringValue = message
-        loadingLabel.stringValue = message
+        if showsLoadingIndicator {
+            loadingLabel.stringValue = loadingMessage
+        }
         suggestionTopConstraint.isActive = hint != nil
         suggestionCenterYConstraint.isActive = hint == nil && !showsLoadingIndicator
         let frame = constrainedFrame(
