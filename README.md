@@ -115,7 +115,7 @@ Supported keys:
 
 ```toml
 codex_cli_path = "/Applications/Codex.app/Contents/Resources/codex"
-model = "gpt-5.4"
+model = "gpt-5.5"
 dev_mode = false
 ```
 
@@ -130,7 +130,7 @@ Optional overrides:
 Defaults:
 
 - `codex_cli_path` defaults to the standard Codex desktop bundle path when present
-- `model` defaults to `gpt-5.4`
+- `model` defaults to `gpt-5.5`
 - `reasoning_effort` defaults to `medium`
 - `prompt_prefix_char_limit` defaults to `4096`
 - `dev_mode` defaults to `false`
