@@ -16,9 +16,7 @@ The core idea is simple:
 
 ## CCC In Action
 
-[![CCC In Action](docs/readme-assets/ccc-in-action-poster.jpg)](https://raw.githubusercontent.com/RoySadaka/ReposMedia/main/ccc/ccc-in-action.mp4)
-
-[Watch the demo video](https://raw.githubusercontent.com/RoySadaka/ReposMedia/main/ccc/ccc-in-action.mp4)
+https://github.com/user-attachments/assets/d02006f3-b9f6-408f-bc1c-aa69e91e486f
 
 CCC is built on top of Codex. CCC does not need to reinvent the brain. When Codex improves, CCC improves with it.
 
