@@ -1,12 +1,17 @@
 import Foundation
 
 protocol CompletionEngine {
-    func suggest(for context: FocusedTextContext, completion: @escaping (Result<String?, Error>) -> Void)
+    func suggest(
+        for context: FocusedTextContext,
+        instanceOrder: Int,
+        instanceID: String,
+        completion: @escaping (Result<String?, Error>) -> Void
+    )
     func retrySuggestion(completion: @escaping (Result<String?, Error>) -> Void)
     func start()
     func resetSession(completion: (() -> Void)?)
     func cancelInFlightRequest()
-    func recordFeedback(_ feedback: CompletionFeedback)
+    func recordFeedback(_ feedback: CompletionFeedback, completion: (() -> Void)?)
 }
 
 extension CompletionEngine {
@@ -24,13 +29,22 @@ extension CompletionEngine {
 
     func cancelInFlightRequest() {}
 
-    func recordFeedback(_ feedback: CompletionFeedback) {}
+    func recordFeedback(_ feedback: CompletionFeedback, completion: (() -> Void)?) {
+        completion?()
+    }
 }
 
 enum CompletionFeedback {
-    case approved
-    case ignored
+    case approved(CompletionFeedbackDetails)
+    case ignored(CompletionFeedbackDetails)
     case retry
+}
+
+struct CompletionFeedbackDetails {
+    let instanceOrder: Int
+    let instanceID: String
+    let appName: String
+    let suggestion: String
 }
 
 private enum PromptRole {
@@ -80,20 +94,33 @@ private enum PromptRole {
         return injectUserName(into: loadRequiredTemplate(.initialization))
     }
 
-    static func continuationPrompt(for context: FocusedTextContext) -> String {
+    static func continuationPrompt(
+        for context: FocusedTextContext,
+        instanceOrder: Int,
+        instanceID: String
+    ) -> String {
         let trimmedPrefix = String(context.prefix.suffix(CCCConfig.promptPrefixCharacterLimit))
         let template = injectUserName(into: loadRequiredTemplate(.continuation))
         guard template.contains(placeholder) else {
             fatalError("Required continuation prompt is missing placeholder \(placeholder)")
         }
+        let instanceNotice = """
+        CCC request metadata:
+        - CCC request ID: \(instanceID)
+        - CCC instance: \(instanceOrder)
+        - Treat the request ID as the stable label for this specific suggestion request.
+        - Do not include this metadata in the completion text.
+        """
         let appContextNotice = appContextPrompt(for: context)
         let screenshotNotice: String
         if context.screenshotURL != nil {
-            screenshotNotice = [appContextNotice, screenshotContextPrompt(), userIdentityPrompt()]
+            screenshotNotice = [instanceNotice, appContextNotice, screenshotContextPrompt(), userIdentityPrompt()]
                 .filter { !$0.isEmpty }
                 .joined(separator: "\n")
         } else {
-            screenshotNotice = appContextNotice
+            screenshotNotice = [instanceNotice, appContextNotice]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
         }
 
         let filledTemplate = template.replacingOccurrences(of: placeholder, with: trimmedPrefix)
@@ -109,14 +136,35 @@ private enum PromptRole {
     }
 
     static func feedbackPrompt(for feedback: CompletionFeedback) -> String {
+        let basePrompt: String
+        let details: CompletionFeedbackDetails?
+
         switch feedback {
-        case .approved:
-            return injectUserName(into: loadRequiredTemplate(.feedbackApproved))
-        case .ignored:
-            return injectUserName(into: loadRequiredTemplate(.feedbackIgnored))
+        case .approved(let feedbackDetails):
+            basePrompt = injectUserName(into: loadRequiredTemplate(.feedbackApproved))
+            details = feedbackDetails
+        case .ignored(let feedbackDetails):
+            basePrompt = injectUserName(into: loadRequiredTemplate(.feedbackIgnored))
+            details = feedbackDetails
         case .retry:
-            return injectUserName(into: loadRequiredTemplate(.feedbackRetry))
+            basePrompt = injectUserName(into: loadRequiredTemplate(.feedbackRetry))
+            details = nil
         }
+
+        guard let details else {
+            return basePrompt
+        }
+
+        return """
+        \(basePrompt)
+
+        Feedback context:
+        - CCC instance: \(details.instanceOrder)
+        - CCC request ID: \(details.instanceID)
+        - App: \(details.appName)
+        - Suggestion:
+        \(details.suggestion)
+        """
     }
 
     private static func validateRequiredTemplates() {
@@ -193,17 +241,22 @@ final class CompositeCompletionEngine: CompletionEngine {
         codexCLIEngine.cancelInFlightRequest()
     }
 
-    func recordFeedback(_ feedback: CompletionFeedback) {
-        codexCLIEngine.recordFeedback(feedback)
+    func recordFeedback(_ feedback: CompletionFeedback, completion: (() -> Void)?) {
+        codexCLIEngine.recordFeedback(feedback, completion: completion)
     }
 
     func retrySuggestion(completion: @escaping (Result<String?, Error>) -> Void) {
         codexCLIEngine.retrySuggestion(completion: completion)
     }
 
-    func suggest(for context: FocusedTextContext, completion: @escaping (Result<String?, Error>) -> Void) {
+    func suggest(
+        for context: FocusedTextContext,
+        instanceOrder: Int,
+        instanceID: String,
+        completion: @escaping (Result<String?, Error>) -> Void
+    ) {
         AppLogger.info("Using Codex CLI completion engine")
-        codexCLIEngine.suggest(for: context) { result in
+        codexCLIEngine.suggest(for: context, instanceOrder: instanceOrder, instanceID: instanceID) { result in
             switch result {
             case .success(let suggestion):
                 if let suggestion, !suggestion.isEmpty {
@@ -362,7 +415,12 @@ final class CodexCLICompletionEngine: CompletionEngine {
         processToCancel.terminate()
     }
 
-    func suggest(for context: FocusedTextContext, completion: @escaping (Result<String?, Error>) -> Void) {
+    func suggest(
+        for context: FocusedTextContext,
+        instanceOrder: Int,
+        instanceID: String,
+        completion: @escaping (Result<String?, Error>) -> Void
+    ) {
         let route = stateQueue.sync { () -> SessionRoutingDecision in
             if let activeContinuationProcess,
                activeContinuationProcess.isRunning {
@@ -386,7 +444,7 @@ final class CodexCLICompletionEngine: CompletionEngine {
 
         switch route {
         case .resume(let sessionID):
-            let prompt = prompt(for: context)
+            let prompt = prompt(for: context, instanceOrder: instanceOrder, instanceID: instanceID)
             runProcess(
                 prompt: prompt,
                 imageURLs: context.screenshotURL.map { [$0] } ?? [],
@@ -413,13 +471,13 @@ final class CodexCLICompletionEngine: CompletionEngine {
             AppLogger.info("Waiting for hidden Codex warm-up session before sending completion request")
             warmupGroup.notify(queue: .global(qos: .userInitiated)) { [weak self] in
                 guard let self else { return }
-                self.suggest(for: context, completion: completion)
+                self.suggest(for: context, instanceOrder: instanceOrder, instanceID: instanceID, completion: completion)
             }
         case .waitForActiveContinuation:
             AppLogger.info("Waiting for active Codex continuation before sending completion request")
             continuationGroup.notify(queue: .global(qos: .userInitiated)) { [weak self] in
                 guard let self else { return }
-                self.suggest(for: context, completion: completion)
+                self.suggest(for: context, instanceOrder: instanceOrder, instanceID: instanceID, completion: completion)
             }
         case .failMissingSession:
             let message = "No active Codex session is available. Reset the session to create a new one."
@@ -483,7 +541,7 @@ final class CodexCLICompletionEngine: CompletionEngine {
         }
     }
 
-    func recordFeedback(_ feedback: CompletionFeedback) {
+    func recordFeedback(_ feedback: CompletionFeedback, completion: (() -> Void)?) {
         let route = stateQueue.sync { () -> SessionRoutingDecision in
             if let activeContinuationProcess,
                activeContinuationProcess.isRunning {
@@ -520,20 +578,22 @@ final class CodexCLICompletionEngine: CompletionEngine {
                         AppLogger.error("Failed to record Codex feedback: \(error.localizedDescription)")
                     }
                 }
+                completion?()
             }
         case .waitForWarmup:
             start()
             AppLogger.info("Waiting for hidden Codex warm-up session before recording feedback")
             warmupGroup.notify(queue: .global(qos: .utility)) { [weak self] in
-                self?.recordFeedback(feedback)
+                self?.recordFeedback(feedback, completion: completion)
             }
         case .waitForActiveContinuation:
             AppLogger.info("Waiting for active Codex continuation before recording feedback")
             continuationGroup.notify(queue: .global(qos: .utility)) { [weak self] in
-                self?.recordFeedback(feedback)
+                self?.recordFeedback(feedback, completion: completion)
             }
         case .failMissingSession:
             AppLogger.error("Skipping Codex feedback because no active session is available")
+            completion?()
         }
     }
 
@@ -698,9 +758,9 @@ final class CodexCLICompletionEngine: CompletionEngine {
         return arguments
     }
 
-    private func prompt(for context: FocusedTextContext) -> String {
+    private func prompt(for context: FocusedTextContext, instanceOrder: Int, instanceID: String) -> String {
         AppLogger.info("Codex prefix payload: <<<\(String(context.prefix.suffix(CCCConfig.promptPrefixCharacterLimit)).logEscaped)>>>")
-        return PromptRole.continuationPrompt(for: context)
+        return PromptRole.continuationPrompt(for: context, instanceOrder: instanceOrder, instanceID: instanceID)
     }
 
     private static func normalizedCodexReasoningEffort(_ rawValue: String?) -> String? {
@@ -890,7 +950,12 @@ final class CodexCLICompletionEngine: CompletionEngine {
 }
 
 final class DemoCompletionEngine: CompletionEngine {
-    func suggest(for context: FocusedTextContext, completion: @escaping (Result<String?, Error>) -> Void) {
+    func suggest(
+        for context: FocusedTextContext,
+        instanceOrder: Int,
+        instanceID: String,
+        completion: @escaping (Result<String?, Error>) -> Void
+    ) {
         let text = context.prefix.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || context.source == .liveFieldProbe else {
             completion(.success(nil))

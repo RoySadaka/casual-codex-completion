@@ -61,7 +61,7 @@ Main keys:
 
 ```toml
 codex_cli_path = "/Applications/Codex.app/Contents/Resources/codex"
-model = "gpt-5.4"
+model = "gpt-5.5"
 dev_mode = false
 ```
 

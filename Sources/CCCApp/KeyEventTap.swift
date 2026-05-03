@@ -30,7 +30,8 @@ final class KeyEventTap {
     private let triggerCopyDelay: TimeInterval = 0.18
     private let triggerCollapseDelay: TimeInterval = 0.03
     private let triggerSubmitDelay: TimeInterval = 0.04
-    private let postCopySettleDelay: TimeInterval = 0.5
+    private let postCopyTimeoutMicros: useconds_t = 1_000_000
+    private let postCopyPollIntervalMicros: useconds_t = 25_000
     private let handler: (KeyboardAction) -> Bool
     private let screenCaptureService = ScreenCaptureService()
     private var eventTap: CFMachPort?
@@ -199,29 +200,33 @@ final class KeyEventTap {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + triggerCopyDelay) { [weak self] in
             guard let self else { return }
+            let pasteboard = NSPasteboard.general
+            let baselineChangeCount = pasteboard.changeCount
             _ = self.postModifiedShortcut(
                 keyCode: CGKeyCode(kVK_ANSI_C),
                 flags: .maskCommand
             )
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + self.postCopySettleDelay) {
-                let clipboardText = NSPasteboard.general.string(forType: .string) ?? ""
+            DispatchQueue.global(qos: .userInitiated).async {
+                let clipboardText = self.waitForFreshClipboardText(afterChangeCount: baselineChangeCount) ?? ""
                 AppLogger.info("Clipboard after ccc copy: <<<\(clipboardText.logEscaped)>>>")
                 let trimmedClipboardText = self.trimTriggerSuffix(from: clipboardText)
-                _ = self.postPlainKey(keyCode: CGKeyCode(kVK_RightArrow))
-                DispatchQueue.main.asyncAfter(deadline: .now() + self.triggerCollapseDelay) { [weak self] in
-                    guard let self else { return }
-                    self.postBackspace(count: 3)
+                DispatchQueue.main.async {
+                    _ = self.postPlainKey(keyCode: CGKeyCode(kVK_RightArrow))
+                    DispatchQueue.main.asyncAfter(deadline: .now() + self.triggerCollapseDelay) { [weak self] in
+                        guard let self else { return }
+                        self.postBackspace(count: 3)
 
-                    DispatchQueue.main.asyncAfter(deadline: .now() + self.triggerSubmitDelay) {
-                        screenshotGroup.notify(queue: .main) {
-                            let handled = self.handler(
-                                .requestCompletionWithCapturedContext(
-                                    CompletionCapture(prefix: trimmedClipboardText, screenshotURL: capturedScreenshotURL)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + self.triggerSubmitDelay) {
+                            screenshotGroup.notify(queue: .main) {
+                                let handled = self.handler(
+                                    .requestCompletionWithCapturedContext(
+                                        CompletionCapture(prefix: trimmedClipboardText, screenshotURL: capturedScreenshotURL)
+                                    )
                                 )
-                            )
-                            if !handled, let capturedScreenshotURL {
-                                ScreenCaptureService.deleteScreenshot(at: capturedScreenshotURL, reason: "request-not-handled")
+                                if !handled, let capturedScreenshotURL {
+                                    ScreenCaptureService.deleteScreenshot(at: capturedScreenshotURL, reason: "request-not-handled")
+                                }
                             }
                         }
                     }
@@ -315,6 +320,26 @@ final class KeyEventTap {
         }
 
         return String(text.dropLast(3))
+    }
+
+    private func waitForFreshClipboardText(afterChangeCount baseline: Int) -> String? {
+        let pasteboard = NSPasteboard.general
+        let attempts = max(1, Int(postCopyTimeoutMicros / postCopyPollIntervalMicros))
+
+        for _ in 0 ..< attempts {
+            usleep(postCopyPollIntervalMicros)
+
+            guard pasteboard.changeCount > baseline else {
+                continue
+            }
+
+            if let text = pasteboard.string(forType: .string) {
+                return text
+            }
+        }
+
+        AppLogger.error("Timed out waiting for fresh clipboard text after ccc copy")
+        return nil
     }
 }
 

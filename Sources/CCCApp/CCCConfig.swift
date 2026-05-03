@@ -183,7 +183,7 @@ enum CCCConfig {
             let defaultPath = "/Applications/Codex.app/Contents/Resources/codex"
             return FileManager.default.isExecutableFile(atPath: defaultPath) ? defaultPath : nil
         case "model":
-            return "gpt-5.4"
+            return "gpt-5.5"
         case "reasoning_effort":
             return "medium"
         default:

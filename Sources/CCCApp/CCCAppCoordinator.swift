@@ -48,7 +48,6 @@ final class CCCAppCoordinator {
 
     private let accessibilityService = AccessibilityTextService()
     private let inputInjector = InputInjector()
-    private let overlay = OverlayWindowController()
     private let completionEngine = CompositeCompletionEngine()
     private let screenCaptureService = ScreenCaptureService()
     private lazy var keyEventTap = KeyEventTap { [weak self] action in
@@ -70,15 +69,12 @@ final class CCCAppCoordinator {
         }
     }
 
-    private var pendingRequestID = UUID()
-    private var visibleSuggestion: VisibleSuggestion?
+    private var completionInstances = [UUID: CompletionInstance]()
+    private var activeCompletionID: UUID?
+    private var queuedCodexWorkItems = [QueuedCodexWorkItem]()
+    private var isProcessingCodexWorkItem = false
     private var composeTargetPID: pid_t?
     private var composeTargetAppName = "unknown"
-    private var suggestionWorkItem: DispatchWorkItem?
-    private var isCompletionRequestInFlight = false
-    private var needsSuggestionRefreshAfterCurrentRequest = false
-    private var explicitPrefixOverride: String?
-    private var explicitScreenshotURL: URL?
     private var sleeping = false
     private var screenshotContextEnabled = true
     private var userEditRevision = 0
@@ -172,22 +168,15 @@ final class CCCAppCoordinator {
             return
         }
 
-        guard syncTrackingTarget(seedFromAccessibility: true) else {
-            AppLogger.error("Cannot refresh suggestion because no frontmost app was found")
-            NSSound.beep()
-            return
-        }
-
-        scheduleSuggestionRefresh(immediate: true)
+        startCompletionInstance(capture: nil)
     }
 
     func dismissSuggestion() {
-        let hadVisibleSuggestion = visibleSuggestion != nil || overlay.isVisible
-        visibleSuggestion = nil
-        if hadVisibleSuggestion {
-            AppLogger.info("Dismissing suggestion")
+        guard let activeCompletionID else {
+            return
         }
-        overlay.hide()
+
+        dismissCompletionInstance(activeCompletionID, recordsIgnoredFeedback: false)
     }
 
     func sleep() {
@@ -216,10 +205,9 @@ final class CCCAppCoordinator {
     func resetSession(completion: (() -> Void)? = nil) {
         AppLogger.info("Resetting Codex session from coordinator")
         completionEngine.resetSession(completion: completion)
-        dismissSuggestion()
-        pendingRequestID = UUID()
-        isCompletionRequestInFlight = false
-        needsSuggestionRefreshAfterCurrentRequest = false
+        dismissAllCompletionInstances(recordsIgnoredFeedback: false)
+        queuedCodexWorkItems.removeAll()
+        isProcessingCodexWorkItem = false
     }
 
     private func handleDismiss() -> Bool {
@@ -227,14 +215,8 @@ final class CCCAppCoordinator {
             return false
         }
 
-        if visibleSuggestion != nil {
-            completionEngine.recordFeedback(.ignored)
-            dismissSuggestion()
-            return true
-        }
-
-        if overlay.isVisible {
-            dismissSuggestion()
+        if let activeCompletionID {
+            dismissCompletionInstance(activeCompletionID, recordsIgnoredFeedback: true)
             return true
         }
 
@@ -246,63 +228,53 @@ final class CCCAppCoordinator {
             return false
         }
 
-        guard let visibleSuggestion else {
+        guard let activeCompletionID,
+              let activeCompletion = completionInstances[activeCompletionID],
+              let activeSuggestion = activeCompletion.suggestion
+        else {
             return false
         }
 
-        let retryContext = visibleSuggestion.context
-        let retryRevision = userEditRevision
-        let requestID = UUID()
-        pendingRequestID = requestID
-        isCompletionRequestInFlight = true
-        needsSuggestionRefreshAfterCurrentRequest = false
-        composeTargetPID = retryContext.appPID
-        composeTargetAppName = retryContext.appName
-
-        dismissSuggestion()
-        overlay.showLoading(near: retryContext.caretRect)
+        _ = activeSuggestion
+        let retryContext = activeCompletion.context
+        var retryInstance = activeCompletion
+        retryInstance.suggestion = nil
+        retryInstance.isLoading = true
+        completionInstances[activeCompletionID] = retryInstance
+        retryInstance.overlay.showLoading(near: retryContext.caretRect, order: retryInstance.loadingOrder)
 
         completionEngine.retrySuggestion { [weak self] result in
             guard let self else { return }
 
             DispatchQueue.main.async {
-                self.isCompletionRequestInFlight = false
-
                 guard !self.sleeping else {
                     return
                 }
 
-                guard self.pendingRequestID == requestID else {
+                guard var completionInstance = self.completionInstances[activeCompletionID] else {
                     return
                 }
 
-                guard retryRevision == self.userEditRevision else {
-                    AppLogger.info(
-                        "Discarding stale retry result. RequestedRevision=\(retryRevision) CurrentRevision=\(self.userEditRevision)"
-                    )
-                    return
-                }
+                completionInstance.isLoading = false
 
                 switch result {
                 case .success(let suggestion):
                     let normalizedSuggestion = suggestion?.trimmingCharacters(in: .newlines) ?? ""
                     guard normalizedSuggestion.contains(where: { !$0.isNewline }) else {
                         AppLogger.info("Retry returned an empty suggestion")
-                        self.dismissSuggestion()
+                        self.dismissCompletionInstance(activeCompletionID, recordsIgnoredFeedback: false)
                         return
                     }
 
                     AppLogger.info("Showing retry suggestion: \(normalizedSuggestion)")
-                    self.visibleSuggestion = VisibleSuggestion(
-                        context: retryContext,
-                        suggestion: normalizedSuggestion,
-                        revision: self.userEditRevision
-                    )
-                    self.overlay.show(suggestion: normalizedSuggestion, near: retryContext.caretRect)
+                    completionInstance.suggestion = normalizedSuggestion
+                    self.completionInstances[activeCompletionID] = completionInstance
+                    completionInstance.overlay.show(suggestion: normalizedSuggestion, near: retryContext.caretRect)
                 case .failure(let error):
                     AppLogger.error("Retry request failed: \(error.localizedDescription)")
-                    self.visibleSuggestion = nil
-                    self.overlay.showStatus(message: "x retry failed", near: retryContext.caretRect)
+                    completionInstance.suggestion = nil
+                    self.completionInstances[activeCompletionID] = completionInstance
+                    completionInstance.overlay.showStatus(message: "x retry failed", near: retryContext.caretRect)
                 }
             }
         }
@@ -319,14 +291,15 @@ final class CCCAppCoordinator {
             return false
         }
 
-        explicitPrefixOverride = capture?.prefix
-        explicitScreenshotURL = capture?.screenshotURL
-        requestCompletion()
-        return true
+        return startCompletionInstance(capture: capture)
     }
 
     private func handleKeyPress(_ keyPress: KeyPress) -> Bool {
         guard !sleeping else {
+            return false
+        }
+
+        guard completionInstances.isEmpty else {
             return false
         }
 
@@ -345,8 +318,6 @@ final class CCCAppCoordinator {
             noteUserEdit()
             return false
         case 123, 124, 125, 126, 115, 116, 119, 121:
-            AppLogger.info("Navigation key pressed. Hiding suggestion until further typing")
-            dismissSuggestion()
             return false
         default:
             break
@@ -358,103 +329,116 @@ final class CCCAppCoordinator {
         }
 
         noteUserEdit()
-        dismissSuggestion()
         return false
     }
 
-    private func scheduleSuggestionRefresh(immediate: Bool = false) {
-        scheduleSuggestionRefresh(delay: immediate ? 0.0 : 0.5)
-    }
-
-    private func scheduleSuggestionRefresh(delay: TimeInterval) {
+    @discardableResult
+    private func startCompletionInstance(capture: CompletionCapture?) -> Bool {
         guard !sleeping else {
-            return
-        }
-
-        suggestionWorkItem?.cancel()
-
-        let workItem = DispatchWorkItem { [weak self] in
-            self?.refreshSuggestion()
-        }
-
-        suggestionWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
-    }
-
-    private func refreshSuggestion() {
-        guard !sleeping else {
-            return
+            return false
         }
 
         guard let frontmostApp = accessibilityService.frontmostApplicationInfo() else {
-            AppLogger.error("Unable to refresh suggestion because there is no frontmost app")
-            visibleSuggestion = nil
+            AppLogger.error("Unable to start completion because there is no frontmost app")
+            let overlay = OverlayWindowController()
             overlay.showStatus(message: "x unable to resolve app", near: .zero)
-            return
+            return false
         }
 
-        syncTrackingTarget(for: frontmostApp, seedFromAccessibility: true)
-
-        let targetPID = frontmostApp.pid
-        let targetAppName = frontmostApp.name
-        composeTargetPID = targetPID
-        composeTargetAppName = targetAppName
-
-        guard composeTargetPID != nil else {
-            return
-        }
-
-        if isCompletionRequestInFlight {
-            needsSuggestionRefreshAfterCurrentRequest = true
-            pendingRequestID = UUID()
-            AppLogger.info("A Codex request is already running")
-            AppLogger.info("Stopping it now")
-            completionEngine.cancelInFlightRequest()
-            AppLogger.info("When the current request finishes, the latest buffer will be refreshed")
-            return
-        }
+        composeTargetPID = frontmostApp.pid
+        composeTargetAppName = frontmostApp.name
 
         let context: FocusedTextContext
-        if let explicitPrefixOverride {
-            let clippedPrefix = String(explicitPrefixOverride.suffix(CCCConfig.promptPrefixCharacterLimit))
+        if let capture {
+            let clippedPrefix = String(capture.prefix.suffix(CCCConfig.promptPrefixCharacterLimit))
             context = accessibilityService.liveFieldProbeContext(
                 for: clippedPrefix,
-                targetPID: targetPID,
-                targetAppName: targetAppName,
-                screenshotURL: explicitScreenshotURL
+                targetPID: frontmostApp.pid,
+                targetAppName: frontmostApp.name,
+                screenshotURL: capture.screenshotURL
             )
-            self.explicitPrefixOverride = nil
-            self.explicitScreenshotURL = nil
-        } else if let probedPrefix = inputInjector.capturePrefixUntilCursor(targetPID: targetPID) {
+        } else if let probedPrefix = inputInjector.capturePrefixUntilCursor(targetPID: frontmostApp.pid) {
             let clippedPrefix = String(probedPrefix.suffix(CCCConfig.promptPrefixCharacterLimit))
             context = accessibilityService.liveFieldProbeContext(
                 for: clippedPrefix,
-                targetPID: targetPID,
-                targetAppName: targetAppName,
+                targetPID: frontmostApp.pid,
+                targetAppName: frontmostApp.name,
                 screenshotURL: nil
             )
         } else {
-            explicitPrefixOverride = nil
-            explicitScreenshotURL = nil
             AppLogger.error("Unable to capture text before cursor from the live field")
-            visibleSuggestion = nil
+            let overlay = OverlayWindowController()
             overlay.showStatus(message: "x unable to read text field", near: .zero)
-            return
+            return false
         }
 
         AppLogger.info(
-            "Refreshing suggestion. Source=\(String(describing: context.source)) App=\(context.appName) PrefixLength=\((context.prefix as NSString).length)"
+            "Starting completion instance. App=\(context.appName) Source=\(String(describing: context.source)) PrefixLength=\((context.prefix as NSString).length)"
         )
 
-        overlay.showLoading(near: context.caretRect)
+        let id = UUID()
+        let loadingOrder = completionInstances.count + 1
+        let codexRequestID = Self.codexRequestID(for: id)
+        let overlay = OverlayWindowController()
+        overlay.onInteract = { [weak self] in
+            self?.activeCompletionID = id
+        }
 
-        let requestID = UUID()
-        let requestedRevision = userEditRevision
-        pendingRequestID = requestID
-        isCompletionRequestInFlight = true
-        needsSuggestionRefreshAfterCurrentRequest = false
+        let instance = CompletionInstance(
+            id: id,
+            context: context,
+            overlay: overlay,
+            loadingOrder: loadingOrder,
+            codexRequestID: codexRequestID,
+            suggestion: nil,
+            isLoading: true
+        )
+        completionInstances[id] = instance
+        activeCompletionID = id
+        overlay.showLoading(near: context.caretRect, order: loadingOrder)
+        enqueueCodexWorkItem(.completion(id))
 
-        completionEngine.suggest(for: context) { [weak self] result in
+        return true
+    }
+
+    private func enqueueCodexWorkItem(_ item: QueuedCodexWorkItem) {
+        queuedCodexWorkItems.append(item)
+        processNextCodexWorkItemIfNeeded()
+    }
+
+    private func processNextCodexWorkItemIfNeeded() {
+        guard !sleeping, !isProcessingCodexWorkItem else {
+            return
+        }
+
+        while !queuedCodexWorkItems.isEmpty {
+            let item = queuedCodexWorkItems.removeFirst()
+
+            switch item {
+            case .completion(let id):
+                guard let instance = completionInstances[id] else {
+                    continue
+                }
+
+                isProcessingCodexWorkItem = true
+                processCompletionInstance(id, instance: instance)
+                return
+
+            case .feedback(let feedback):
+                isProcessingCodexWorkItem = true
+                processFeedback(feedback)
+                return
+            }
+        }
+    }
+
+    private func processCompletionInstance(_ id: UUID, instance: CompletionInstance) {
+        let context = instance.context
+        completionEngine.suggest(
+            for: context,
+            instanceOrder: instance.loadingOrder,
+            instanceID: instance.codexRequestID
+        ) { [weak self] result in
             guard let self else { return }
 
             DispatchQueue.main.async {
@@ -462,60 +446,55 @@ final class CCCAppCoordinator {
                     if let screenshotURL = context.screenshotURL {
                         ScreenCaptureService.deleteScreenshot(at: screenshotURL, reason: "post-codex-request")
                     }
+                    self.isProcessingCodexWorkItem = false
+                    self.processNextCodexWorkItemIfNeeded()
                 }
-
-                self.isCompletionRequestInFlight = false
 
                 guard !self.sleeping else {
                     return
                 }
 
-                if self.pendingRequestID != requestID {
-                    if self.needsSuggestionRefreshAfterCurrentRequest {
-                        self.needsSuggestionRefreshAfterCurrentRequest = false
-                        self.scheduleSuggestionRefresh(immediate: true)
-                    }
+                guard var completionInstance = self.completionInstances[id] else {
                     return
                 }
 
-                if requestedRevision != self.userEditRevision {
-                    AppLogger.info(
-                        "Discarding stale suggestion result. RequestedRevision=\(requestedRevision) CurrentRevision=\(self.userEditRevision)"
-                    )
-                    if self.needsSuggestionRefreshAfterCurrentRequest {
-                        self.needsSuggestionRefreshAfterCurrentRequest = false
-                        self.scheduleSuggestionRefresh(immediate: true)
-                    }
-                    return
-                }
+                completionInstance.isLoading = false
 
                 switch result {
                 case .success(let suggestion):
                     let normalizedSuggestion = suggestion?.trimmingCharacters(in: .newlines) ?? ""
                     guard normalizedSuggestion.contains(where: { !$0.isNewline }) else {
-                        AppLogger.info("Completion engine returned an empty suggestion")
-                        self.dismissSuggestion()
+                        AppLogger.info("Completion instance returned an empty suggestion")
+                        self.dismissCompletionInstance(id, recordsIgnoredFeedback: false)
                         return
                     }
 
-                    let displayText = normalizedSuggestion
-                    AppLogger.info("Showing suggestion: \(displayText)")
-                    self.visibleSuggestion = VisibleSuggestion(
-                        context: context,
-                        suggestion: displayText,
-                        revision: self.userEditRevision
-                    )
-                    self.overlay.show(suggestion: displayText, near: context.caretRect)
+                    AppLogger.info("Showing completion instance suggestion: \(normalizedSuggestion)")
+                    completionInstance.suggestion = normalizedSuggestion
+                    self.completionInstances[id] = completionInstance
+                    self.activeCompletionID = id
+                    completionInstance.overlay.show(suggestion: normalizedSuggestion, near: context.caretRect)
+
                 case .failure(let error):
-                    AppLogger.error("Completion engine failed: \(error.localizedDescription)")
-                    self.visibleSuggestion = nil
-                    self.overlay.showStatus(message: "x ccc failed", near: context.caretRect)
+                    AppLogger.error("Completion instance failed: \(error.localizedDescription)")
+                    completionInstance.suggestion = nil
+                    self.completionInstances[id] = completionInstance
+                    self.activeCompletionID = id
+                    completionInstance.overlay.showStatus(message: "x ccc failed", near: context.caretRect)
+                }
+            }
+        }
+    }
+
+    private func processFeedback(_ feedback: CompletionFeedback) {
+        completionEngine.recordFeedback(feedback) { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else {
+                    return
                 }
 
-                if self.needsSuggestionRefreshAfterCurrentRequest {
-                    self.needsSuggestionRefreshAfterCurrentRequest = false
-                    self.scheduleSuggestionRefresh(immediate: true)
-                }
+                self.isProcessingCodexWorkItem = false
+                self.processNextCodexWorkItemIfNeeded()
             }
         }
     }
@@ -525,27 +504,83 @@ final class CCCAppCoordinator {
             return false
         }
 
-        guard let visibleSuggestion, let targetPID = composeTargetPID else {
+        guard let activeCompletionID,
+              let activeCompletion = completionInstances[activeCompletionID],
+              let suggestion = activeCompletion.suggestion
+        else {
             AppLogger.info("Accept requested but no suggestion is visible")
             return false
         }
 
-        AppLogger.info("Attempting to insert suggestion: \(visibleSuggestion.suggestion)")
+        AppLogger.info("Attempting to insert suggestion: \(suggestion)")
         AppLogger.info("Using paste-only insertion mode")
         let inserted = inputInjector.insertUsingPasteboard(
-            visibleSuggestion.suggestion,
-            targetPID: targetPID
+            suggestion,
+            targetPID: activeCompletion.context.appPID
         )
 
         if inserted {
-            completionEngine.recordFeedback(.approved)
-            dismissSuggestion()
+            enqueueCodexWorkItem(
+                .feedback(.approved(feedbackDetails(for: activeCompletion, suggestion: suggestion)))
+            )
+            dismissCompletionInstance(activeCompletionID, recordsIgnoredFeedback: false)
         } else {
             AppLogger.error("Suggestion insertion failed")
             NSSound.beep()
         }
 
         return inserted
+    }
+
+    private func dismissCompletionInstance(_ id: UUID, recordsIgnoredFeedback: Bool) {
+        guard let instance = completionInstances.removeValue(forKey: id) else {
+            return
+        }
+
+        queuedCodexWorkItems.removeAll { item in
+            if case .completion(let queuedID) = item {
+                return queuedID == id
+            }
+
+            return false
+        }
+
+        if recordsIgnoredFeedback, let suggestion = instance.suggestion {
+            enqueueCodexWorkItem(
+                .feedback(.ignored(feedbackDetails(for: instance, suggestion: suggestion)))
+            )
+        }
+
+        AppLogger.info("Dismissing completion instance \(id)")
+        instance.overlay.hide()
+
+        if activeCompletionID == id {
+            activeCompletionID = completionInstances.keys.first
+        }
+    }
+
+    private func dismissAllCompletionInstances(recordsIgnoredFeedback: Bool) {
+        let ids = Array(completionInstances.keys)
+        for id in ids {
+            dismissCompletionInstance(id, recordsIgnoredFeedback: recordsIgnoredFeedback)
+        }
+        activeCompletionID = nil
+    }
+
+    private func feedbackDetails(
+        for instance: CompletionInstance,
+        suggestion: String
+    ) -> CompletionFeedbackDetails {
+        CompletionFeedbackDetails(
+            instanceOrder: instance.loadingOrder,
+            instanceID: instance.codexRequestID,
+            appName: instance.context.appName,
+            suggestion: suggestion
+        )
+    }
+
+    private static func codexRequestID(for id: UUID) -> String {
+        "ccc-\(String(id.uuidString.prefix(8)).lowercased())"
     }
 
     private func noteUserEdit() {
@@ -602,16 +637,9 @@ final class CCCAppCoordinator {
         }
 
         _ = seedFromAccessibility
-        pendingRequestID = UUID()
         userEditRevision = 0
-        suggestionWorkItem?.cancel()
-        suggestionWorkItem = nil
-        isCompletionRequestInFlight = false
-        needsSuggestionRefreshAfterCurrentRequest = false
 
         AppLogger.info("Tracking armed for \(frontmostApp.name) pid=\(frontmostApp.pid) InvocationMode=explicit")
-
-        dismissSuggestion()
     }
 
     private func setSleeping(_ newValue: Bool, source: SleepChangeSource) {
@@ -630,21 +658,27 @@ final class CCCAppCoordinator {
     }
 
     private func resetStateForSleep() {
-        suggestionWorkItem?.cancel()
-        suggestionWorkItem = nil
-        pendingRequestID = UUID()
-        needsSuggestionRefreshAfterCurrentRequest = false
-        isCompletionRequestInFlight = false
+        queuedCodexWorkItems.removeAll()
+        isProcessingCodexWorkItem = false
         userEditRevision = 0
         composeTargetPID = nil
         composeTargetAppName = "unknown"
-        dismissSuggestion()
+        dismissAllCompletionInstances(recordsIgnoredFeedback: false)
         AppLogger.info("ccc is sleeping")
     }
 }
 
-private struct VisibleSuggestion {
+private enum QueuedCodexWorkItem {
+    case completion(UUID)
+    case feedback(CompletionFeedback)
+}
+
+private struct CompletionInstance {
+    let id: UUID
     let context: FocusedTextContext
-    let suggestion: String
-    let revision: Int
+    let overlay: OverlayWindowController
+    let loadingOrder: Int
+    let codexRequestID: String
+    var suggestion: String?
+    var isLoading: Bool
 }

@@ -40,26 +40,12 @@ final class ScreenCaptureService {
             return nil
         }
 
-        if let window = bestWindow(for: frontmostApp.processIdentifier, windows: windows),
-           let image = CGWindowListCreateImage(
-                .null,
-                .optionIncludingWindow,
-                window.id,
-                [.bestResolution, .boundsIgnoreFraming]
-           ),
-           let url = persist(image: image) {
-            AppLogger.info(
-                "Captured screenshot of focused window. App=\(frontmostApp.localizedName ?? "unknown") pid=\(frontmostApp.processIdentifier) WindowID=\(window.id) Path=\(url.path)"
-            )
-            return url
-        }
-
         if let window = bestWindow(for: frontmostApp.processIdentifier, windows: windows) {
             let displayID = displayID(containing: window.bounds) ?? CGMainDisplayID()
             if let image = CGDisplayCreateImage(displayID),
                let url = persist(image: image) {
                 AppLogger.info(
-                    "Captured screenshot of containing display. App=\(frontmostApp.localizedName ?? "unknown") pid=\(frontmostApp.processIdentifier) DisplayID=\(displayID) Path=\(url.path)"
+                    "Captured screenshot of full containing display. App=\(frontmostApp.localizedName ?? "unknown") pid=\(frontmostApp.processIdentifier) DisplayID=\(displayID) WindowID=\(window.id) Path=\(url.path)"
                 )
                 return url
             }
