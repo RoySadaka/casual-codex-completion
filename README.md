@@ -1,5 +1,5 @@
 # CCC
-[![Twitter](https://img.shields.io/twitter/url/https/twitter.com/roysadaka.svg?style=social&label=RoySadaka)](https://twitter.com/roysadaka)
+[![Twitter](https://img.shields.io/twitter/url/https/twitter.com/roysadaka.svg?style=social&label=RoySadaka)](https://x.com/roysadaka)
 ![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)
 
 CCC is for Casual Codex Completion ✨
