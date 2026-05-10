@@ -411,14 +411,20 @@ enum CodexAppServerSideSuggestion {
                 "suggestion": [
                     "type": "string"
                 ],
-                "situation_summary": [
+                "visual_context": [
+                    "type": "string"
+                ],
+                "intent_analysis": [
+                    "type": "string"
+                ],
+                "suggestion_rationale": [
                     "type": "string"
                 ],
                 "memory_update": [
                     "type": "string"
                 ]
             ],
-            "required": ["suggestion", "situation_summary", "memory_update"]
+            "required": ["suggestion", "visual_context", "intent_analysis", "suggestion_rationale", "memory_update"]
         ]
     }
 
@@ -430,14 +436,18 @@ enum CodexAppServerSideSuggestion {
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return CodexSideThreadSuggestion(
                 suggestion: trimmed,
-                situationSummary: "The side thread returned an unstructured suggestion.",
+                visualContext: "The side thread returned an unstructured response, so no visual context report was available.",
+                intentAnalysis: "",
+                suggestionRationale: "The unstructured response was used as the suggestion fallback.",
                 memoryUpdate: ""
             )
         }
 
         return CodexSideThreadSuggestion(
             suggestion: object["suggestion"] as? String ?? "",
-            situationSummary: object["situation_summary"] as? String ?? "",
+            visualContext: object["visual_context"] as? String ?? object["situation_summary"] as? String ?? "",
+            intentAnalysis: object["intent_analysis"] as? String ?? "",
+            suggestionRationale: object["suggestion_rationale"] as? String ?? "",
             memoryUpdate: object["memory_update"] as? String ?? ""
         )
     }

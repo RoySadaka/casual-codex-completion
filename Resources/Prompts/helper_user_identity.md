@@ -1,1 +1,1 @@
-The user's name is {{USER_NAME}}. If the screenshot includes people, avatars, participants, profile labels, or account names, treat {{USER_NAME}} as the user whenever the image provides that evidence.
+Treat {{USER_NAME}} as the person using CCC. If the screenshot includes people, avatars, participants, profile labels, or account names, use that evidence to identify the user when possible.

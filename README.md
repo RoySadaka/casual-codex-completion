@@ -6,15 +6,15 @@ CCC is for Casual Codex Completion ✨
 
 Want CCC? Point Codex at this repo and tell it to follow [HOW_TO_INSTALL.md](HOW_TO_INSTALL.md), that's it.
 
-CCC is a macOS app that lets you summon Codex into almost any textbox.
+CCC is a macOS app that lets you summon Codex into almost any textbox as a context-aware writing assistant.
 
-Smash the `c` key three times to summon CCC into your scope. CCC will call out to your local Codex CLI, pull back a completion, and offer it inline right where you are working. Notes, chats, docs, forms, prompts, random text fields: if you can type there, CCC aims to bring Codex there too.
+Smash the `c` key three times to summon CCC into your scope. CCC will call out to your local Codex CLI, understand the focused app and visible context, and offer useful text inline right where you are working. Sometimes that is a continuation. Sometimes it is a reply, task note, prompt, command, clarification, or next-step draft. Notes, chats, docs, forms, prompts, random text fields: if you can type there, CCC aims to bring Codex there too.
 
 The core idea is simple:
 
 - summon Codex in any textbox
 - stay inside the app you are already using
-- get better as Codex gets better 🫡
+- get more useful as Codex gets better 🫡
 
 ## CCC In Action
 
@@ -24,7 +24,7 @@ CCC is built on top of Codex. CCC does not need to reinvent the brain. When Code
 
 ## Future
 
-CCC might evolve from Casual-Codex-Completion to Casual-Codex-ComputerUse, going beyond text completion into broader on-screen assistance and action 🛸
+CCC might evolve from Casual-Codex-Completion to Casual-Codex-ComputerUse, going beyond inline text assistance into broader on-screen help and action 🛸
 
 Over time, CCC should get more personal. Through Codex Chronicle, it can build a better sense of how you write, what you care about, and how to help in a way that feels more like your own flow 🧠
 
@@ -40,7 +40,7 @@ Repo layout:
 
 - Runs as a lightweight macOS app with a small control window.
 - Watches typing through a global event tap while the app is active.
-- Requests a completion from the local Codex CLI when you hit `ccc`.
+- Requests context-aware assistance from the local Codex CLI when you hit `ccc`.
 - Shows a floating suggestion.
 - Accepts the suggestion into the active app through paste-based injection.
 
@@ -127,7 +127,7 @@ Optional overrides:
 # reasoning_effort = "medium"
 # user_name = "Your Name"
 # prompt_prefix_char_limit = 4096
-# compaction_invocation_interval = 0
+# compaction_invocation_interval = 10
 ```
 
 Defaults:
@@ -136,10 +136,10 @@ Defaults:
 - `model` defaults to `gpt-5.5`
 - `reasoning_effort` defaults to `medium`
 - `prompt_prefix_char_limit` defaults to `4096`
-- `compaction_invocation_interval` defaults to `0`; native Codex compaction remains available as an opt-in fallback
+- `compaction_invocation_interval` defaults to `10`; set it to `0` to disable native Codex compaction
 - `dev_mode` defaults to `false`
 
-CCC keeps the main Codex thread text-only. Each completion runs in an ephemeral visual side thread, uses the screenshot there, injects a compact text-only memory record back into the main thread, and then cleans up the side thread. Local runtime state lives next to the active session id, including the optional automatic compaction counter in `compaction_invocation_count.txt`.
+CCC keeps the main Codex thread text-only. Each invocation runs in an ephemeral visual side thread, uses the screenshot there, returns structured suggestion/context/rationale fields, injects a compact text-only memory record back into the main thread, and then cleans up the side thread. Local runtime state lives next to the active session id, including the automatic compaction counter in `compaction_invocation_count.txt`.
 
 ## Permissions
 
@@ -155,7 +155,7 @@ Why they matter:
 - Input Monitoring: required to watch global key events so `ccc`, `Tab`, `Shift+Tab`, and `Escape` work across apps.
 - Screen Recording: only needed when screenshot context is enabled, so Codex can use the current window as extra context.
 
-Without these permissions, completion capture and screenshot-assisted context will degrade or fail.
+Without these permissions, suggestion capture and screenshot-assisted context will degrade or fail.
 
 ## Logs
 

@@ -54,7 +54,9 @@ struct CompletionFeedbackDetails {
 
 struct CodexSideThreadSuggestion {
     let suggestion: String
-    let situationSummary: String
+    let visualContext: String
+    let intentAnalysis: String
+    let suggestionRationale: String
     let memoryUpdate: String
 }
 
@@ -174,17 +176,28 @@ private enum PromptRole {
 
         Return a JSON object with exactly these string fields:
         - suggestion: the exact text to insert next
-        - situation_summary: a concise text-only summary of the app/conversation/document context you used
-        - memory_update: any stable writing-style or preference signal the main CCC thread should remember, or an empty string
+        - visual_context: a detailed text-only report of what is visible and relevant in the screenshot/app
+        - intent_analysis: what {{USER_NAME}} appears to be trying to do in this field and who the text is for
+        - suggestion_rationale: why this suggestion fits the visible context, or why an empty suggestion is necessary
+        - memory_update: only stable writing-style or preference signal the main CCC thread should remember; do not turn one-off bad outputs into style
 
-        Suggestion rules:
-        - The user's name is {{USER_NAME}}.
+        Assistant rules:
+        - Treat {{USER_NAME}} as the person using CCC.
         - Return the insertion text in suggestion only; never put explanations, labels, markdown, or JSON wrappers inside suggestion.
         - Do not repeat or restate text that already appears before the cursor.
+        - Ignore any visible "ccc", "cc", or "c" trigger residue. Those letters are the invocation marker, not text to complete, copy, or learn from.
+        - Never set suggestion to "c", "cc", "ccc", or a continuation of the invocation marker.
+        - Behave like a capable personal assistant embedded at the cursor, not just an autocomplete system.
+        - Decide whether the situation calls for continuing the current sentence, drafting on {{USER_NAME}}'s behalf, answering a question, turning an intent into a message, writing a task/prompt/note, or giving concise next-step help.
+        - If the current field is addressed to someone else, write as {{USER_NAME}} to that person, not as an assistant speaking to {{USER_NAME}}.
+        - If {{USER_NAME}} appears to be asking for help, write the helpful response that belongs in the current field.
+        - Use the screenshot to infer the current task, relationship, surface, and intended audience when that is visually clear.
+        - Make visual_context useful to the main CCC thread. Include the app, focused surface, visible conversation/document/task, relevant nearby text, intended audience, and whether trigger residue is visible. Do not compress it to one vague sentence.
         - Match {{USER_NAME}}'s language, tone, style, formatting, punctuation, and level of warmth or brevity.
         - Include a leading space, punctuation mark, or newline in suggestion if that is part of the correct insertion.
         - Preserve the current writing mode. If {{USER_NAME}} is writing code, keep writing code. If they are writing a message, keep writing the message.
-        - If there is no strong continuation, set suggestion to an empty string.
+        - CCC was explicitly invoked, so make a useful attempt. If the exact intent is unclear, write a short, safe, context-appropriate draft, starter, follow-up, clarification, or next-step text that belongs in the focused field.
+        - Set suggestion to an empty string only when producing any text would be clearly wrong, impossible, or unsafe.
 
         \(contextNotices)
 
@@ -212,11 +225,20 @@ private enum PromptRole {
         Text before cursor tail:
         \(trimmedPrefix)
 
-        Disposable side-thread context summary:
-        \(sideSuggestion.situationSummary)
+        Disposable side-thread visual context report:
+        \(sideSuggestion.visualContext)
+
+        Side-thread intent analysis:
+        \(sideSuggestion.intentAnalysis)
 
         Suggestion shown to {{USER_NAME}}:
         \(sideSuggestion.suggestion)
+
+        Side-thread suggestion rationale:
+        \(sideSuggestion.suggestionRationale)
+
+        Suggestion validity note:
+        \(suggestionValidityNote(sideSuggestion.suggestion))
 
         Memory update:
         \(sideSuggestion.memoryUpdate)
@@ -224,6 +246,18 @@ private enum PromptRole {
         Note: any screenshot for this request was used only inside an ephemeral side thread and was not added to this main thread.
         """
         return injectUserName(into: record)
+    }
+
+    private static func suggestionValidityNote(_ suggestion: String) -> String {
+        let normalized = suggestion
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        if ["c", "cc", "ccc"].contains(normalized) {
+            return "Invalid suggestion: this looks like CCC invocation trigger residue, not useful user text. Do not learn it as style."
+        }
+
+        return "No automatic invalidity detected."
     }
 
     static func feedbackPrompt(for feedback: CompletionFeedback) -> String {
