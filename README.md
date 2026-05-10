@@ -127,7 +127,7 @@ Optional overrides:
 # reasoning_effort = "medium"
 # user_name = "Your Name"
 # prompt_prefix_char_limit = 4096
-# compaction_invocation_interval = 5
+# compaction_invocation_interval = 0
 ```
 
 Defaults:
@@ -136,10 +136,10 @@ Defaults:
 - `model` defaults to `gpt-5.5`
 - `reasoning_effort` defaults to `medium`
 - `prompt_prefix_char_limit` defaults to `4096`
-- `compaction_invocation_interval` defaults to `5`; set it to `0` to disable automatic Codex session compaction
+- `compaction_invocation_interval` defaults to `0`; native Codex compaction remains available as an opt-in fallback
 - `dev_mode` defaults to `false`
 
-CCC stores local runtime state next to the active session id, including the current automatic compaction counter in `compaction_invocation_count.txt`.
+CCC keeps the main Codex thread text-only. Each completion runs in an ephemeral visual side thread, uses the screenshot there, injects a compact text-only memory record back into the main thread, and then cleans up the side thread. Local runtime state lives next to the active session id, including the optional automatic compaction counter in `compaction_invocation_count.txt`.
 
 ## Permissions
 

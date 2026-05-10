@@ -2,7 +2,7 @@ import Foundation
 
 enum CCCConfig {
     static let defaultPromptPrefixCharacterLimit = 4096
-    static let defaultCompactionInvocationInterval = 5
+    static let defaultCompactionInvocationInterval = 0
 
     static func stringValue(forKey key: String) -> String? {
         guard var value = rawValue(forKey: key) ?? defaultStringValue(forKey: key) else {

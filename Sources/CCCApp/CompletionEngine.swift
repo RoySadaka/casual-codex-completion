@@ -52,6 +52,12 @@ struct CompletionFeedbackDetails {
     let suggestion: String
 }
 
+struct CodexSideThreadSuggestion {
+    let suggestion: String
+    let situationSummary: String
+    let memoryUpdate: String
+}
+
 private enum PromptRole {
     private static let userNameKey = "user_name"
 
@@ -138,6 +144,86 @@ private enum PromptRole {
 
         \(filledTemplate)
         """
+    }
+
+    static func sideThreadPrompt(
+        for context: FocusedTextContext,
+        instanceOrder: Int,
+        instanceID: String
+    ) -> String {
+        let trimmedPrefix = String(context.prefix.suffix(CCCConfig.promptPrefixCharacterLimit))
+        let contextNotices = [
+            """
+            CCC request metadata:
+            - CCC request ID: \(instanceID)
+            - CCC instance: \(instanceOrder)
+            - Treat the request ID as the stable label for this specific suggestion request.
+            - Do not include this metadata in the suggestion text.
+            """,
+            appContextPrompt(for: context),
+            context.screenshotURL == nil ? "" : screenshotContextPrompt(),
+            context.screenshotURL == nil ? "" : userIdentityPrompt()
+        ]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+
+        let prompt = """
+        You are running in a disposable CCC visual side thread.
+
+        For this side-thread turn only, return JSON instead of raw insertion text. The main CCC thread will receive only the text summary from this JSON; screenshots must remain local to this side thread.
+
+        Return a JSON object with exactly these string fields:
+        - suggestion: the exact text to insert next
+        - situation_summary: a concise text-only summary of the app/conversation/document context you used
+        - memory_update: any stable writing-style or preference signal the main CCC thread should remember, or an empty string
+
+        Suggestion rules:
+        - The user's name is {{USER_NAME}}.
+        - Return the insertion text in suggestion only; never put explanations, labels, markdown, or JSON wrappers inside suggestion.
+        - Do not repeat or restate text that already appears before the cursor.
+        - Match {{USER_NAME}}'s language, tone, style, formatting, punctuation, and level of warmth or brevity.
+        - Include a leading space, punctuation mark, or newline in suggestion if that is part of the correct insertion.
+        - Preserve the current writing mode. If {{USER_NAME}} is writing code, keep writing code. If they are writing a message, keep writing the message.
+        - If there is no strong continuation, set suggestion to an empty string.
+
+        \(contextNotices)
+
+        Text before cursor:
+        \(trimmedPrefix)
+        """
+        return injectUserName(into: prompt)
+    }
+
+    static func mainThreadMemoryRecord(
+        for context: FocusedTextContext,
+        instanceOrder: Int,
+        instanceID: String,
+        sideSuggestion: CodexSideThreadSuggestion
+    ) -> String {
+        let trimmedPrefix = String(context.prefix.suffix(1200))
+        let record = """
+        CCC text-only interaction update.
+
+        Request:
+        - CCC request ID: \(instanceID)
+        - CCC instance: \(instanceOrder)
+        - App: \(context.appName)
+
+        Text before cursor tail:
+        \(trimmedPrefix)
+
+        Disposable side-thread context summary:
+        \(sideSuggestion.situationSummary)
+
+        Suggestion shown to {{USER_NAME}}:
+        \(sideSuggestion.suggestion)
+
+        Memory update:
+        \(sideSuggestion.memoryUpdate)
+
+        Note: any screenshot for this request was used only inside an ephemeral side thread and was not added to this main thread.
+        """
+        return injectUserName(into: record)
     }
 
     static func feedbackPrompt(for feedback: CompletionFeedback) -> String {
@@ -461,24 +547,21 @@ final class CodexCLICompletionEngine: CompletionEngine {
 
         switch route {
         case .resume(let sessionID):
-            let prompt = prompt(for: context, instanceOrder: instanceOrder, instanceID: instanceID)
-            runProcess(
+            let prompt = sideThreadPrompt(for: context, instanceOrder: instanceOrder, instanceID: instanceID)
+            runSideSuggestionProcess(
+                sessionID: sessionID,
                 prompt: prompt,
-                imageURLs: context.screenshotURL.map { [$0] } ?? [],
-                requestKind: .continuation(sessionID: sessionID, purpose: .suggestion)
+                imageURL: context.screenshotURL,
+                context: context,
+                instanceOrder: instanceOrder,
+                instanceID: instanceID
             ) { result in
                 switch result {
                 case .success(let payload):
-                    if let resolvedSessionID = payload.sessionID,
-                       resolvedSessionID != sessionID {
-                        AppLogger.info(
-                            "Codex CLI resumed session returned SessionID=\(resolvedSessionID) while active SessionID=\(sessionID). Keeping the existing active session."
-                        )
-                    }
                     AppLogger.info(
-                        "Codex CLI response decoded. SuggestionLength=\((payload.outputText ?? "") as NSString).length SessionID=\(sessionID)"
+                        "Codex side suggestion decoded. SuggestionLength=\((payload.suggestion as NSString).length) SessionID=\(sessionID)"
                     )
-                    completion(.success(payload.outputText))
+                    completion(.success(payload.suggestion))
                 case .failure(let error):
                     completion(.failure(error))
                 }
@@ -823,6 +906,58 @@ final class CodexCLICompletionEngine: CompletionEngine {
         )
     }
 
+    private func runSideSuggestionProcess(
+        sessionID: String,
+        prompt: String,
+        imageURL: URL?,
+        context: FocusedTextContext,
+        instanceOrder: Int,
+        instanceID: String,
+        completion: @escaping (Result<CodexSideThreadSuggestion, Error>) -> Void
+    ) {
+        CodexAppServerSideSuggestion.suggest(
+            codexPath: codexPath,
+            workingDirectory: workingDirectory,
+            baseSessionID: sessionID,
+            model: model,
+            reasoningEffort: reasoningEffort,
+            prompt: prompt,
+            imageURL: imageURL,
+            memoryRecord: { sideSuggestion in
+                PromptRole.mainThreadMemoryRecord(
+                    for: context,
+                    instanceOrder: instanceOrder,
+                    instanceID: instanceID,
+                    sideSuggestion: sideSuggestion
+                )
+            },
+            processWillStart: { process in
+                self.stateQueue.sync {
+                    self.activeContinuationProcess = process
+                    self.continuationGroup.enter()
+                }
+            },
+            processDidFinish: { process in
+                let (wasCancelled, shouldLeaveContinuationGroup) = self.stateQueue.sync { () -> (Bool, Bool) in
+                    let shouldLeaveContinuationGroup = self.activeContinuationProcess === process
+                    if self.activeContinuationProcess === process {
+                        self.activeContinuationProcess = nil
+                    }
+
+                    let wasCancelled = self.cancelledProcessIdentifiers.remove(ObjectIdentifier(process)) != nil
+                    return (wasCancelled, shouldLeaveContinuationGroup)
+                }
+
+                if shouldLeaveContinuationGroup {
+                    self.continuationGroup.leave()
+                }
+
+                return wasCancelled
+            },
+            completion: completion
+        )
+    }
+
     private func commandArguments(
         prompt: String,
         imageURLs: [URL],
@@ -864,6 +999,11 @@ final class CodexCLICompletionEngine: CompletionEngine {
     private func prompt(for context: FocusedTextContext, instanceOrder: Int, instanceID: String) -> String {
         AppLogger.info("Codex prefix payload: <<<\(String(context.prefix.suffix(CCCConfig.promptPrefixCharacterLimit)).logEscaped)>>>")
         return PromptRole.continuationPrompt(for: context, instanceOrder: instanceOrder, instanceID: instanceID)
+    }
+
+    private func sideThreadPrompt(for context: FocusedTextContext, instanceOrder: Int, instanceID: String) -> String {
+        AppLogger.info("Codex side-thread prefix payload: <<<\(String(context.prefix.suffix(CCCConfig.promptPrefixCharacterLimit)).logEscaped)>>>")
+        return PromptRole.sideThreadPrompt(for: context, instanceOrder: instanceOrder, instanceID: instanceID)
     }
 
     private static func normalizedCodexReasoningEffort(_ rawValue: String?) -> String? {

@@ -7,5 +7,6 @@ model = "gpt-5.5"
 # reasoning_effort = "medium"
 # user_name = "Your Name"
 # prompt_prefix_char_limit = 4096
-# compaction_invocation_interval = 5
+# Native Codex compaction is off by default because CCC uses ephemeral visual side threads.
+# compaction_invocation_interval = 0
 dev_mode = false
