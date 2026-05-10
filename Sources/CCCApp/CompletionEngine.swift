@@ -12,6 +12,7 @@ protocol CompletionEngine {
     func resetSession(completion: (() -> Void)?)
     func cancelInFlightRequest()
     func recordFeedback(_ feedback: CompletionFeedback, completion: (() -> Void)?)
+    func compactSession(completion: @escaping (Result<Void, Error>) -> Void)
 }
 
 extension CompletionEngine {
@@ -31,6 +32,10 @@ extension CompletionEngine {
 
     func recordFeedback(_ feedback: CompletionFeedback, completion: (() -> Void)?) {
         completion?()
+    }
+
+    func compactSession(completion: @escaping (Result<Void, Error>) -> Void) {
+        completion(.success(()))
     }
 }
 
@@ -245,6 +250,10 @@ final class CompositeCompletionEngine: CompletionEngine {
         codexCLIEngine.recordFeedback(feedback, completion: completion)
     }
 
+    func compactSession(completion: @escaping (Result<Void, Error>) -> Void) {
+        codexCLIEngine.compactSession(completion: completion)
+    }
+
     func retrySuggestion(completion: @escaping (Result<String?, Error>) -> Void) {
         codexCLIEngine.retrySuggestion(completion: completion)
     }
@@ -310,6 +319,7 @@ final class CodexCLICompletionEngine: CompletionEngine {
     private var warmupStarted = false
     private var warmupFinished = false
     private var activeContinuationProcess: Process?
+    private var activeCompactionProcess: Process?
     private var cancelledProcessIdentifiers = Set<ObjectIdentifier>()
 
     init(
@@ -397,14 +407,17 @@ final class CodexCLICompletionEngine: CompletionEngine {
 
     func cancelInFlightRequest() {
         let processToCancel = stateQueue.sync { () -> Process? in
-            guard let activeContinuationProcess,
-                  activeContinuationProcess.isRunning
-            else {
-                return nil
+            if let activeContinuationProcess, activeContinuationProcess.isRunning {
+                cancelledProcessIdentifiers.insert(ObjectIdentifier(activeContinuationProcess))
+                return activeContinuationProcess
             }
 
-            cancelledProcessIdentifiers.insert(ObjectIdentifier(activeContinuationProcess))
-            return activeContinuationProcess
+            if let activeCompactionProcess, activeCompactionProcess.isRunning {
+                cancelledProcessIdentifiers.insert(ObjectIdentifier(activeCompactionProcess))
+                return activeCompactionProcess
+            }
+
+            return nil
         }
 
         guard let processToCancel else {
@@ -424,6 +437,10 @@ final class CodexCLICompletionEngine: CompletionEngine {
         let route = stateQueue.sync { () -> SessionRoutingDecision in
             if let activeContinuationProcess,
                activeContinuationProcess.isRunning {
+                return .waitForActiveContinuation
+            }
+            if let activeCompactionProcess,
+               activeCompactionProcess.isRunning {
                 return .waitForActiveContinuation
             }
 
@@ -492,6 +509,10 @@ final class CodexCLICompletionEngine: CompletionEngine {
                activeContinuationProcess.isRunning {
                 return .waitForActiveContinuation
             }
+            if let activeCompactionProcess,
+               activeCompactionProcess.isRunning {
+                return .waitForActiveContinuation
+            }
 
             if let sessionID, !sessionID.isEmpty {
                 return .resume(sessionID: sessionID)
@@ -547,6 +568,10 @@ final class CodexCLICompletionEngine: CompletionEngine {
                activeContinuationProcess.isRunning {
                 return .waitForActiveContinuation
             }
+            if let activeCompactionProcess,
+               activeCompactionProcess.isRunning {
+                return .waitForActiveContinuation
+            }
 
             if let sessionID, !sessionID.isEmpty {
                 return .resume(sessionID: sessionID)
@@ -594,6 +619,49 @@ final class CodexCLICompletionEngine: CompletionEngine {
         case .failMissingSession:
             AppLogger.error("Skipping Codex feedback because no active session is available")
             completion?()
+        }
+    }
+
+    func compactSession(completion: @escaping (Result<Void, Error>) -> Void) {
+        let route = stateQueue.sync { () -> SessionRoutingDecision in
+            if let activeContinuationProcess,
+               activeContinuationProcess.isRunning {
+                return .waitForActiveContinuation
+            }
+            if let activeCompactionProcess,
+               activeCompactionProcess.isRunning {
+                return .waitForActiveContinuation
+            }
+
+            if let sessionID, !sessionID.isEmpty {
+                return .resume(sessionID: sessionID)
+            }
+
+            if !warmupStarted || !warmupFinished {
+                return .waitForWarmup
+            }
+
+            return .failMissingSession
+        }
+
+        switch route {
+        case .resume(let sessionID):
+            runCompactionProcess(sessionID: sessionID, completion: completion)
+        case .waitForWarmup:
+            start()
+            AppLogger.info("Waiting for hidden Codex warm-up session before compacting Codex session")
+            warmupGroup.notify(queue: .global(qos: .utility)) { [weak self] in
+                self?.compactSession(completion: completion)
+            }
+        case .waitForActiveContinuation:
+            AppLogger.info("Waiting for active Codex continuation before compacting Codex session")
+            continuationGroup.notify(queue: .global(qos: .utility)) { [weak self] in
+                self?.compactSession(completion: completion)
+            }
+        case .failMissingSession:
+            let message = "No active Codex session is available. Skipping compaction."
+            AppLogger.error(message)
+            completion(.failure(CodexCLIError.executionFailed(message)))
         }
     }
 
@@ -718,6 +786,41 @@ final class CodexCLICompletionEngine: CompletionEngine {
             AppLogger.error("Failed to start Codex CLI process: \(error.localizedDescription)")
             completion(.failure(error))
         }
+    }
+
+    private func runCompactionProcess(
+        sessionID: String,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        CodexAppServerCompactor.compact(
+            codexPath: codexPath,
+            workingDirectory: workingDirectory,
+            sessionID: sessionID,
+            processWillStart: { process in
+                self.stateQueue.sync {
+                    self.activeCompactionProcess = process
+                    self.continuationGroup.enter()
+                }
+            },
+            processDidFinish: { process in
+                let (wasCancelled, shouldLeaveContinuationGroup) = self.stateQueue.sync { () -> (Bool, Bool) in
+                    let shouldLeaveContinuationGroup = self.activeCompactionProcess === process
+                    if self.activeCompactionProcess === process {
+                        self.activeCompactionProcess = nil
+                    }
+
+                    let wasCancelled = self.cancelledProcessIdentifiers.remove(ObjectIdentifier(process)) != nil
+                    return (wasCancelled, shouldLeaveContinuationGroup)
+                }
+
+                if shouldLeaveContinuationGroup {
+                    self.continuationGroup.leave()
+                }
+
+                return wasCancelled
+            },
+            completion: completion
+        )
     }
 
     private func commandArguments(

@@ -41,6 +41,10 @@ enum CCCPaths {
         appSupportDirectoryURL.appendingPathComponent("session_id.txt")
     }
 
+    static var compactionInvocationCountURL: URL {
+        appSupportDirectoryURL.appendingPathComponent("compaction_invocation_count.txt")
+    }
+
     static func promptTemplateURL(named fileName: String) -> URL? {
         promptTemplateSearchPaths(fileName: fileName).first { FileManager.default.fileExists(atPath: $0.path) }
     }

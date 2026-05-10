@@ -73,6 +73,7 @@ final class CCCAppCoordinator {
     private var activeCompletionID: UUID?
     private var queuedCodexWorkItems = [QueuedCodexWorkItem]()
     private var isProcessingCodexWorkItem = false
+    private var completionsSinceLastCompaction = CCCAppCoordinator.loadPersistedCompactionInvocationCount()
     private var composeTargetPID: pid_t?
     private var composeTargetAppName = "unknown"
     private var sleeping = false
@@ -208,6 +209,7 @@ final class CCCAppCoordinator {
         dismissAllCompletionInstances(recordsIgnoredFeedback: false)
         queuedCodexWorkItems.removeAll()
         isProcessingCodexWorkItem = false
+        resetCompactionInvocationCount()
     }
 
     private func handleDismiss() -> Bool {
@@ -428,6 +430,11 @@ final class CCCAppCoordinator {
                 isProcessingCodexWorkItem = true
                 processFeedback(feedback)
                 return
+
+            case .compaction:
+                isProcessingCodexWorkItem = true
+                processCompaction()
+                return
             }
         }
     }
@@ -446,6 +453,7 @@ final class CCCAppCoordinator {
                     if let screenshotURL = context.screenshotURL {
                         ScreenCaptureService.deleteScreenshot(at: screenshotURL, reason: "post-codex-request")
                     }
+                    self.noteCompletionInvocationFinished()
                     self.isProcessingCodexWorkItem = false
                     self.processNextCodexWorkItemIfNeeded()
                 }
@@ -482,6 +490,54 @@ final class CCCAppCoordinator {
                     self.activeCompletionID = id
                     completionInstance.overlay.showStatus(message: "x ccc failed", near: context.caretRect)
                 }
+            }
+        }
+    }
+
+    private func noteCompletionInvocationFinished() {
+        let interval = CCCConfig.compactionInvocationInterval
+        guard !sleeping, interval > 0 else {
+            return
+        }
+
+        completionsSinceLastCompaction += 1
+        persistCompactionInvocationCount()
+        AppLogger.info("Codex compaction invocation count \(completionsSinceLastCompaction)/\(interval)")
+
+        guard completionsSinceLastCompaction >= interval else {
+            return
+        }
+
+        resetCompactionInvocationCount()
+        queuedCodexWorkItems.insert(.compaction, at: 0)
+        AppLogger.info("Queued Codex session compaction after \(interval) completion invocations")
+    }
+
+    private func resetCompactionInvocationCount() {
+        completionsSinceLastCompaction = 0
+        persistCompactionInvocationCount()
+    }
+
+    private func persistCompactionInvocationCount() {
+        Self.persistCompactionInvocationCount(completionsSinceLastCompaction)
+    }
+
+    private func processCompaction() {
+        completionEngine.compactSession { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else {
+                    return
+                }
+
+                switch result {
+                case .success:
+                    AppLogger.info("Codex session compaction completed")
+                case .failure(let error):
+                    AppLogger.error("Codex session compaction failed: \(error.localizedDescription)")
+                }
+
+                self.isProcessingCodexWorkItem = false
+                self.processNextCodexWorkItemIfNeeded()
             }
         }
     }
@@ -666,11 +722,33 @@ final class CCCAppCoordinator {
         dismissAllCompletionInstances(recordsIgnoredFeedback: false)
         AppLogger.info("ccc is sleeping")
     }
+
+    private static func loadPersistedCompactionInvocationCount() -> Int {
+        let url = CCCPaths.compactionInvocationCountURL
+        guard let contents = try? String(contentsOf: url, encoding: .utf8),
+              let value = Int(contents.trimmingCharacters(in: .whitespacesAndNewlines)),
+              value >= 0 else {
+            return 0
+        }
+
+        return value
+    }
+
+    private static func persistCompactionInvocationCount(_ count: Int) {
+        let url = CCCPaths.compactionInvocationCountURL
+        do {
+            try CCCPaths.ensureParentDirectoryExists(for: url)
+            try "\(max(0, count))\n".write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            AppLogger.error("Failed to persist Codex compaction invocation count: \(error.localizedDescription)")
+        }
+    }
 }
 
 private enum QueuedCodexWorkItem {
     case completion(UUID)
     case feedback(CompletionFeedback)
+    case compaction
 }
 
 private struct CompletionInstance {

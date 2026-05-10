@@ -127,6 +127,7 @@ Optional overrides:
 # reasoning_effort = "medium"
 # user_name = "Your Name"
 # prompt_prefix_char_limit = 4096
+# compaction_invocation_interval = 5
 ```
 
 Defaults:
@@ -135,7 +136,10 @@ Defaults:
 - `model` defaults to `gpt-5.5`
 - `reasoning_effort` defaults to `medium`
 - `prompt_prefix_char_limit` defaults to `4096`
+- `compaction_invocation_interval` defaults to `5`; set it to `0` to disable automatic Codex session compaction
 - `dev_mode` defaults to `false`
+
+CCC stores local runtime state next to the active session id, including the current automatic compaction counter in `compaction_invocation_count.txt`.
 
 ## Permissions
 

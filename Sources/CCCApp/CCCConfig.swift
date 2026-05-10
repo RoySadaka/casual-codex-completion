@@ -2,6 +2,7 @@ import Foundation
 
 enum CCCConfig {
     static let defaultPromptPrefixCharacterLimit = 4096
+    static let defaultCompactionInvocationInterval = 5
 
     static func stringValue(forKey key: String) -> String? {
         guard var value = rawValue(forKey: key) ?? defaultStringValue(forKey: key) else {
@@ -75,6 +76,14 @@ enum CCCConfig {
     static var promptPrefixCharacterLimit: Int {
         guard let value = intValue(forKey: "prompt_prefix_char_limit"), value > 0 else {
             return defaultPromptPrefixCharacterLimit
+        }
+
+        return value
+    }
+
+    static var compactionInvocationInterval: Int {
+        guard let value = intValue(forKey: "compaction_invocation_interval"), value >= 0 else {
+            return defaultCompactionInvocationInterval
         }
 
         return value
@@ -204,6 +213,8 @@ enum CCCConfig {
         switch key {
         case "prompt_prefix_char_limit":
             return defaultPromptPrefixCharacterLimit
+        case "compaction_invocation_interval":
+            return defaultCompactionInvocationInterval
         default:
             return nil
         }
