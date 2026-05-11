@@ -8,13 +8,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
     private var window: NSWindow?
     private var engineRow: CCCMetricRowView?
     private var visionRow: CCCMetricRowView?
+    private var memoryRow: CCCMetricRowView?
     private var sleepButton: CCCButton?
     private var screenshotButton: CCCButton?
     private var accessibilityButton: CCCButton?
     private var resetButton: CCCButton?
+    private var resetMemoryButton: CCCButton?
     private var userNameField: NSTextField?
     private var devModeToggle: NSSwitch?
     private var loadingOverlay: CCCLoadingOverlayView?
+    private var permissionRefreshTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLogger.info("Application launched. Log file: \(AppLogger.logFileURL.path)")
@@ -22,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         installMainMenu()
         installWindow()
         coordinator.start()
+        startPermissionRefreshTimer()
         updateUI()
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -36,7 +40,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
     }
 
     func windowWillClose(_ notification: Notification) {
+        permissionRefreshTimer?.invalidate()
         NSApp.terminate(nil)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        permissionRefreshTimer?.invalidate()
     }
 
     @objc
@@ -87,6 +96,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
     }
 
     @objc
+    private func resetMemory(_ sender: Any?) {
+        showLoadingOverlay(message: "Resetting CCC memory…")
+        CCCMemoryStore.shared.clear { [weak self] in
+            guard let self else { return }
+            self.hideLoadingOverlay()
+            self.updateUI()
+        }
+    }
+
+    @objc
+    private func openMemoryFolder(_ sender: Any?) {
+        try? CCCPaths.ensureParentDirectoryExists(for: CCCPaths.memorySnapshotURL)
+        NSWorkspace.shared.activateFileViewerSelecting([CCCPaths.memoryDirectoryURL])
+    }
+
+    @objc
     private func quit(_ sender: Any?) {
         NSApp.terminate(nil)
     }
@@ -133,6 +158,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         appMenu.addItem(.separator())
         appMenu.addItem(NSMenuItem(title: "Prompt For Required Permissions", action: #selector(promptPermissions(_:)), keyEquivalent: ""))
         appMenu.addItem(NSMenuItem(title: "Dismiss Suggestion", action: #selector(hideSuggestion(_:)), keyEquivalent: ""))
+        appMenu.addItem(NSMenuItem(title: "Open CCC Memory Folder", action: #selector(openMemoryFolder(_:)), keyEquivalent: ""))
+        appMenu.addItem(NSMenuItem(title: "Reset CCC Memory", action: #selector(resetMemory(_:)), keyEquivalent: ""))
         appMenu.addItem(.separator())
         appMenu.addItem(NSMenuItem(title: "Quit CCC", action: #selector(quit(_:)), keyEquivalent: "q"))
 
@@ -144,9 +171,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         NSApp.mainMenu = mainMenu
     }
 
+    private func startPermissionRefreshTimer() {
+        permissionRefreshTimer?.invalidate()
+        permissionRefreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            guard !self.coordinator.hasRequiredPermissions else {
+                self.updateUI()
+                return
+            }
+
+            _ = self.coordinator.refreshPermissionsAndEventTap(promptForAccessibility: false)
+            self.updateUI()
+        }
+    }
+
     private func installWindow() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 350),
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 392),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -196,8 +237,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
 
         let engineRow = CCCMetricRowView(title: "Engine")
         let visionRow = CCCMetricRowView(title: "Vision")
+        let memoryRow = CCCMetricRowView(title: "Memory")
         self.engineRow = engineRow
         self.visionRow = visionRow
+        self.memoryRow = memoryRow
 
         let userNameTitle = makeLabel(
             "User Name",
@@ -287,6 +330,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         resetButton.action = #selector(resetSession(_:))
         self.resetButton = resetButton
 
+        let resetMemoryButton = CCCButton(title: "Reset CCC Memory")
+        resetMemoryButton.target = self
+        resetMemoryButton.action = #selector(resetMemory(_:))
+        self.resetMemoryButton = resetMemoryButton
+
         let topButtons = NSStackView(views: [sleepButton, screenshotButton])
         topButtons.orientation = .horizontal
         topButtons.spacing = 8
@@ -297,6 +345,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         bottomButtons.spacing = 8
         bottomButtons.distribution = .fillEqually
 
+        let memoryButtons = NSStackView(views: [resetMemoryButton])
+        memoryButtons.orientation = .horizontal
+        memoryButtons.spacing = 8
+        memoryButtons.distribution = .fillEqually
+
         [
             userNameStack,
             devModeStack,
@@ -304,9 +357,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
             engineRow,
             separatorTwo,
             visionRow,
+            memoryRow,
             separatorThree,
             topButtons,
-            bottomButtons
+            bottomButtons,
+            memoryButtons
         ].forEach(metricsStack.addArrangedSubview)
 
         let triggerBadge = CCCShortcutBadgeView(key: "ccc", caption: "Trigger")
@@ -335,10 +390,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         screenshotButton.heightAnchor.constraint(equalToConstant: 30).isActive = true
         accessibilityButton.heightAnchor.constraint(equalToConstant: 30).isActive = true
         resetButton.heightAnchor.constraint(equalToConstant: 30).isActive = true
+        resetMemoryButton.heightAnchor.constraint(equalToConstant: 30).isActive = true
         userNameStack.widthAnchor.constraint(equalTo: metricsStack.widthAnchor).isActive = true
         devModeStack.widthAnchor.constraint(equalTo: metricsStack.widthAnchor).isActive = true
         engineRow.widthAnchor.constraint(equalTo: metricsStack.widthAnchor).isActive = true
         visionRow.widthAnchor.constraint(equalTo: metricsStack.widthAnchor).isActive = true
+        memoryRow.widthAnchor.constraint(equalTo: metricsStack.widthAnchor).isActive = true
         topButtons.widthAnchor.constraint(equalTo: metricsStack.widthAnchor).isActive = true
         bottomButtons.widthAnchor.constraint(equalTo: metricsStack.widthAnchor).isActive = true
         userNameField.widthAnchor.constraint(equalTo: metricsStack.widthAnchor).isActive = true
@@ -381,6 +438,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         let hasScreenCapturePermission = coordinator.hasScreenCapturePermission
         let hasRequiredPermissions = coordinator.hasRequiredPermissions
         let devModeEnabled = configuredDevMode()
+        let memoryCount = CCCMemoryStore.shared.activityCount()
 
         engineRow?.update(
             value: sleeping ? "Paused" : "Live",
@@ -390,6 +448,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         visionRow?.update(
             value: screenshotEnabled ? (hasScreenCapturePermission ? "On" : "Blocked") : "Off",
             tone: screenshotEnabled ? (hasScreenCapturePermission ? .blue : .danger) : .neutral
+        )
+
+        memoryRow?.update(
+            value: CCCConfig.memoryEnabled ? (memoryCount == 0 ? "Learning" : "\(memoryCount)") : "Off",
+            tone: CCCConfig.memoryEnabled ? .blue : .neutral
         )
 
         sleepButton?.title = sleeping ? "Wake" : "Sleep"
@@ -405,6 +468,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTe
         resetButton?.title = "Reset Codex Session"
         resetButton?.tone = .normal
         resetButton?.isEnabled = !sleeping
+        resetMemoryButton?.title = "Reset CCC Memory"
+        resetMemoryButton?.tone = .normal
         devModeToggle?.state = devModeEnabled ? .on : .off
 
     }

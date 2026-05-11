@@ -45,6 +45,22 @@ enum CCCPaths {
         appSupportDirectoryURL.appendingPathComponent("compaction_invocation_count.txt")
     }
 
+    static var memoryDirectoryURL: URL {
+        appSupportDirectoryURL.appendingPathComponent("Chronicle", isDirectory: true)
+    }
+
+    static var memoryActivityLogURL: URL {
+        memoryDirectoryURL.appendingPathComponent("activity.jsonl")
+    }
+
+    static var memoryFeedbackLogURL: URL {
+        memoryDirectoryURL.appendingPathComponent("feedback.jsonl")
+    }
+
+    static var memorySnapshotURL: URL {
+        memoryDirectoryURL.appendingPathComponent("memory_snapshot.md")
+    }
+
     static func promptTemplateURL(named fileName: String) -> URL? {
         promptTemplateSearchPaths(fileName: fileName).first { FileManager.default.fileExists(atPath: $0.path) }
     }

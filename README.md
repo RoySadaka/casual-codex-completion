@@ -127,6 +127,9 @@ Optional overrides:
 # reasoning_effort = "medium"
 # user_name = "Your Name"
 # prompt_prefix_char_limit = 4096
+# memory_enabled = true
+# memory_activity_limit = 80
+# memory_prompt_char_limit = 6000
 # compaction_invocation_interval = 10
 ```
 
@@ -136,10 +139,15 @@ Defaults:
 - `model` defaults to `gpt-5.5`
 - `reasoning_effort` defaults to `medium`
 - `prompt_prefix_char_limit` defaults to `4096`
+- `memory_enabled` defaults to `true`
+- `memory_activity_limit` defaults to `80`
+- `memory_prompt_char_limit` defaults to `6000`
 - `compaction_invocation_interval` defaults to `10`; set it to `0` to disable native Codex compaction
 - `dev_mode` defaults to `false`
 
-CCC keeps the main Codex thread text-only. Each invocation runs in an ephemeral visual side thread, uses the screenshot there, returns structured suggestion/context/rationale fields, injects a compact text-only memory record back into the main thread, and then cleans up the side thread. Local runtime state lives next to the active session id, including the automatic compaction counter in `compaction_invocation_count.txt`.
+CCC keeps the main Codex thread text-only. Each invocation runs in an ephemeral visual side thread, uses the screenshot there, returns structured suggestion/context/rationale fields, injects a compact text-only memory record back into the main thread, and then cleans up the side thread.
+
+CCC Chronicle also keeps a local durable memory layer under `~/Library/Application Support/CCC/Chronicle/`. It records recent structured interaction summaries in `activity.jsonl`, records suggestion feedback in `feedback.jsonl`, and rebuilds a compact `memory_snapshot.md`. This local memory is bounded, transparent, and resettable; it does not rehydrate or inject snapshots into the main Codex session. Local runtime state lives next to the active session id, including the automatic compaction counter in `compaction_invocation_count.txt`.
 
 ## Permissions
 

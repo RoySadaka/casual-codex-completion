@@ -133,7 +133,7 @@ enum CodexAppServerCompactor {
                     }
 
                     guard let message = jsonObject(from: line) else {
-                        if line.contains("context_compacted") {
+                        if isCompactionSignal(line) {
                             finishLocked(.success(()))
                             return
                         }
@@ -164,7 +164,7 @@ enum CodexAppServerCompactor {
                         return
                     }
 
-                    if line.contains("context_compacted") {
+                    if isCompactionSignal(line) {
                         finishLocked(.success(()))
                         return
                     }
@@ -237,5 +237,11 @@ enum CodexAppServerCompactor {
         }
 
         return String(describing: value)
+    }
+
+    private static func isCompactionSignal(_ line: String) -> Bool {
+        line.contains("context_compacted")
+            || line.contains("context_compaction")
+            || line.contains("contextCompaction")
     }
 }

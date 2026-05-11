@@ -8,6 +8,13 @@ protocol CompletionEngine {
         completion: @escaping (Result<String?, Error>) -> Void
     )
     func retrySuggestion(completion: @escaping (Result<String?, Error>) -> Void)
+    func retrySuggestion(
+        for context: FocusedTextContext,
+        rejectedSuggestion: String,
+        instanceOrder: Int,
+        instanceID: String,
+        completion: @escaping (Result<String?, Error>) -> Void
+    )
     func start()
     func resetSession(completion: (() -> Void)?)
     func cancelInFlightRequest()
@@ -19,6 +26,15 @@ extension CompletionEngine {
     func start() {}
     func retrySuggestion(completion: @escaping (Result<String?, Error>) -> Void) {
         completion(.failure(CodexCLIError.executionFailed("Retry is unavailable")))
+    }
+    func retrySuggestion(
+        for context: FocusedTextContext,
+        rejectedSuggestion: String,
+        instanceOrder: Int,
+        instanceID: String,
+        completion: @escaping (Result<String?, Error>) -> Void
+    ) {
+        retrySuggestion(completion: completion)
     }
     func resetSession() {
         resetSession(completion: nil)
@@ -151,9 +167,22 @@ private enum PromptRole {
     static func sideThreadPrompt(
         for context: FocusedTextContext,
         instanceOrder: Int,
-        instanceID: String
+        instanceID: String,
+        rejectedSuggestion: String? = nil
     ) -> String {
         let trimmedPrefix = String(context.prefix.suffix(CCCConfig.promptPrefixCharacterLimit))
+        let retryNotice: String
+        if let rejectedSuggestion = rejectedSuggestion?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty {
+            retryNotice = """
+            Retry context:
+            - The user rejected or asked to replace this previous suggestion:
+            \(rejectedSuggestion)
+            - Produce a meaningfully different option that still fits the same field.
+            - Do not mention the rejected suggestion.
+            """
+        } else {
+            retryNotice = ""
+        }
         let contextNotices = [
             """
             CCC request metadata:
@@ -162,7 +191,9 @@ private enum PromptRole {
             - Treat the request ID as the stable label for this specific suggestion request.
             - Do not include this metadata in the suggestion text.
             """,
+            retryNotice,
             appContextPrompt(for: context),
+            CCCContextIntelligence.promptNotice(for: context),
             context.screenshotURL == nil ? "" : screenshotContextPrompt(),
             context.screenshotURL == nil ? "" : userIdentityPrompt()
         ]
@@ -196,6 +227,7 @@ private enum PromptRole {
         - Match {{USER_NAME}}'s language, tone, style, formatting, punctuation, and level of warmth or brevity.
         - Include a leading space, punctuation mark, or newline in suggestion if that is part of the correct insertion.
         - Preserve the current writing mode. If {{USER_NAME}} is writing code, keep writing code. If they are writing a message, keep writing the message.
+        - Follow the deterministic context read when it helps choose the insertion shape, but let the actual field text and screenshot override it when they clearly disagree.
         - CCC was explicitly invoked, so make a useful attempt. If the exact intent is unclear, write a short, safe, context-appropriate draft, starter, follow-up, clarification, or next-step text that belongs in the focused field.
         - Set suggestion to an empty string only when producing any text would be clearly wrong, impossible, or unsafe.
 
@@ -348,6 +380,7 @@ private enum PromptRole {
         let template = loadRequiredTemplate(.userIdentity)
         return injectUserName(into: template)
     }
+
 }
 
 final class CompositeCompletionEngine: CompletionEngine {
@@ -376,6 +409,22 @@ final class CompositeCompletionEngine: CompletionEngine {
 
     func retrySuggestion(completion: @escaping (Result<String?, Error>) -> Void) {
         codexCLIEngine.retrySuggestion(completion: completion)
+    }
+
+    func retrySuggestion(
+        for context: FocusedTextContext,
+        rejectedSuggestion: String,
+        instanceOrder: Int,
+        instanceID: String,
+        completion: @escaping (Result<String?, Error>) -> Void
+    ) {
+        codexCLIEngine.retrySuggestion(
+            for: context,
+            rejectedSuggestion: rejectedSuggestion,
+            instanceOrder: instanceOrder,
+            instanceID: instanceID,
+            completion: completion
+        )
     }
 
     func suggest(
@@ -563,7 +612,6 @@ final class CodexCLICompletionEngine: CompletionEngine {
                activeCompactionProcess.isRunning {
                 return .waitForActiveContinuation
             }
-
             if let sessionID, !sessionID.isEmpty {
                 return .resume(sessionID: sessionID)
             }
@@ -594,6 +642,11 @@ final class CodexCLICompletionEngine: CompletionEngine {
                 case .success(let payload):
                     AppLogger.info(
                         "Codex side suggestion decoded. SuggestionLength=\((payload.suggestion as NSString).length) SessionID=\(sessionID)"
+                    )
+                    CCCMemoryStore.shared.recordInteraction(
+                        context: context,
+                        instanceID: instanceID,
+                        sideSuggestion: payload
                     )
                     completion(.success(payload.suggestion))
                 case .failure(let error):
@@ -630,7 +683,6 @@ final class CodexCLICompletionEngine: CompletionEngine {
                activeCompactionProcess.isRunning {
                 return .waitForActiveContinuation
             }
-
             if let sessionID, !sessionID.isEmpty {
                 return .resume(sessionID: sessionID)
             }
@@ -679,7 +731,13 @@ final class CodexCLICompletionEngine: CompletionEngine {
         }
     }
 
-    func recordFeedback(_ feedback: CompletionFeedback, completion: (() -> Void)?) {
+    func retrySuggestion(
+        for context: FocusedTextContext,
+        rejectedSuggestion: String,
+        instanceOrder: Int,
+        instanceID: String,
+        completion: @escaping (Result<String?, Error>) -> Void
+    ) {
         let route = stateQueue.sync { () -> SessionRoutingDecision in
             if let activeContinuationProcess,
                activeContinuationProcess.isRunning {
@@ -689,7 +747,91 @@ final class CodexCLICompletionEngine: CompletionEngine {
                activeCompactionProcess.isRunning {
                 return .waitForActiveContinuation
             }
+            if let sessionID, !sessionID.isEmpty {
+                return .resume(sessionID: sessionID)
+            }
 
+            if !warmupStarted || !warmupFinished {
+                return .waitForWarmup
+            }
+
+            return .failMissingSession
+        }
+
+        switch route {
+        case .resume(let sessionID):
+            let prompt = sideThreadPrompt(
+                for: context,
+                instanceOrder: instanceOrder,
+                instanceID: instanceID,
+                rejectedSuggestion: rejectedSuggestion
+            )
+            AppLogger.info("Requesting context-aware Codex retry alternative")
+            runSideSuggestionProcess(
+                sessionID: sessionID,
+                prompt: prompt,
+                imageURL: context.screenshotURL,
+                context: context,
+                instanceOrder: instanceOrder,
+                instanceID: instanceID
+            ) { result in
+                switch result {
+                case .success(let payload):
+                    AppLogger.info(
+                        "Codex side retry decoded. SuggestionLength=\((payload.suggestion as NSString).length) SessionID=\(sessionID)"
+                    )
+                    CCCMemoryStore.shared.recordInteraction(
+                        context: context,
+                        instanceID: instanceID,
+                        sideSuggestion: payload
+                    )
+                    completion(.success(payload.suggestion))
+                case .failure(let error):
+                    completion(.failure(error))
+                }
+            }
+        case .waitForWarmup:
+            start()
+            AppLogger.info("Waiting for hidden Codex warm-up session before requesting context-aware retry")
+            warmupGroup.notify(queue: .global(qos: .userInitiated)) { [weak self] in
+                self?.retrySuggestion(
+                    for: context,
+                    rejectedSuggestion: rejectedSuggestion,
+                    instanceOrder: instanceOrder,
+                    instanceID: instanceID,
+                    completion: completion
+                )
+            }
+        case .waitForActiveContinuation:
+            AppLogger.info("Waiting for active Codex continuation before requesting context-aware retry")
+            continuationGroup.notify(queue: .global(qos: .userInitiated)) { [weak self] in
+                self?.retrySuggestion(
+                    for: context,
+                    rejectedSuggestion: rejectedSuggestion,
+                    instanceOrder: instanceOrder,
+                    instanceID: instanceID,
+                    completion: completion
+                )
+            }
+        case .failMissingSession:
+            let message = "No active Codex session is available. Reset the session to create a new one."
+            AppLogger.error(message)
+            completion(.failure(CodexCLIError.executionFailed(message)))
+        }
+    }
+
+    func recordFeedback(_ feedback: CompletionFeedback, completion: (() -> Void)?) {
+        CCCMemoryStore.shared.recordFeedback(feedback)
+
+        let route = stateQueue.sync { () -> SessionRoutingDecision in
+            if let activeContinuationProcess,
+               activeContinuationProcess.isRunning {
+                return .waitForActiveContinuation
+            }
+            if let activeCompactionProcess,
+               activeCompactionProcess.isRunning {
+                return .waitForActiveContinuation
+            }
             if let sessionID, !sessionID.isEmpty {
                 return .resume(sessionID: sessionID)
             }
@@ -749,7 +891,6 @@ final class CodexCLICompletionEngine: CompletionEngine {
                activeCompactionProcess.isRunning {
                 return .waitForActiveContinuation
             }
-
             if let sessionID, !sessionID.isEmpty {
                 return .resume(sessionID: sessionID)
             }
@@ -1035,9 +1176,19 @@ final class CodexCLICompletionEngine: CompletionEngine {
         return PromptRole.continuationPrompt(for: context, instanceOrder: instanceOrder, instanceID: instanceID)
     }
 
-    private func sideThreadPrompt(for context: FocusedTextContext, instanceOrder: Int, instanceID: String) -> String {
+    private func sideThreadPrompt(
+        for context: FocusedTextContext,
+        instanceOrder: Int,
+        instanceID: String,
+        rejectedSuggestion: String? = nil
+    ) -> String {
         AppLogger.info("Codex side-thread prefix payload: <<<\(String(context.prefix.suffix(CCCConfig.promptPrefixCharacterLimit)).logEscaped)>>>")
-        return PromptRole.sideThreadPrompt(for: context, instanceOrder: instanceOrder, instanceID: instanceID)
+        return PromptRole.sideThreadPrompt(
+            for: context,
+            instanceOrder: instanceOrder,
+            instanceID: instanceID,
+            rejectedSuggestion: rejectedSuggestion
+        )
     }
 
     private static func normalizedCodexReasoningEffort(_ rawValue: String?) -> String? {

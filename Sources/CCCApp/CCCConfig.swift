@@ -3,6 +3,8 @@ import Foundation
 enum CCCConfig {
     static let defaultPromptPrefixCharacterLimit = 4096
     static let defaultCompactionInvocationInterval = 10
+    static let defaultMemoryActivityLimit = 80
+    static let defaultMemoryPromptCharacterLimit = 6000
 
     static func stringValue(forKey key: String) -> String? {
         guard var value = rawValue(forKey: key) ?? defaultStringValue(forKey: key) else {
@@ -87,6 +89,26 @@ enum CCCConfig {
         }
 
         return value
+    }
+
+    static var memoryActivityLimit: Int {
+        guard let value = intValue(forKey: "memory_activity_limit"), value > 0 else {
+            return defaultMemoryActivityLimit
+        }
+
+        return value
+    }
+
+    static var memoryPromptCharacterLimit: Int {
+        guard let value = intValue(forKey: "memory_prompt_char_limit"), value > 0 else {
+            return defaultMemoryPromptCharacterLimit
+        }
+
+        return value
+    }
+
+    static var memoryEnabled: Bool {
+        boolValue(forKey: "memory_enabled") ?? true
     }
 
     static func setStringValue(_ value: String?, forKey key: String) throws {
@@ -204,6 +226,8 @@ enum CCCConfig {
         switch key {
         case "dev_mode":
             return false
+        case "memory_enabled":
+            return true
         default:
             return nil
         }
@@ -215,6 +239,10 @@ enum CCCConfig {
             return defaultPromptPrefixCharacterLimit
         case "compaction_invocation_interval":
             return defaultCompactionInvocationInterval
+        case "memory_activity_limit":
+            return defaultMemoryActivityLimit
+        case "memory_prompt_char_limit":
+            return defaultMemoryPromptCharacterLimit
         default:
             return nil
         }

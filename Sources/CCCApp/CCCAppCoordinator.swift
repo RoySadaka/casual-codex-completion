@@ -245,7 +245,12 @@ final class CCCAppCoordinator {
         completionInstances[activeCompletionID] = retryInstance
         retryInstance.overlay.showLoading(near: retryContext.caretRect, order: retryInstance.loadingOrder)
 
-        completionEngine.retrySuggestion { [weak self] result in
+        completionEngine.retrySuggestion(
+            for: retryContext,
+            rejectedSuggestion: activeSuggestion,
+            instanceOrder: activeCompletion.loadingOrder,
+            instanceID: "\(activeCompletion.codexRequestID)-retry"
+        ) { [weak self] result in
             guard let self else { return }
 
             DispatchQueue.main.async {
@@ -261,9 +266,8 @@ final class CCCAppCoordinator {
 
                 switch result {
                 case .success(let suggestion):
-                    let normalizedSuggestion = suggestion?.trimmingCharacters(in: .newlines) ?? ""
-                    guard normalizedSuggestion.contains(where: { !$0.isNewline }) else {
-                        AppLogger.info("Retry returned an empty suggestion")
+                    guard let normalizedSuggestion = CCCSuggestionSanitizer.sanitize(suggestion, for: retryContext) else {
+                        AppLogger.info("Retry returned an empty or rejected suggestion")
                         self.dismissCompletionInstance(activeCompletionID, recordsIgnoredFeedback: false)
                         return
                     }
@@ -470,9 +474,8 @@ final class CCCAppCoordinator {
 
                 switch result {
                 case .success(let suggestion):
-                    let normalizedSuggestion = suggestion?.trimmingCharacters(in: .newlines) ?? ""
-                    guard normalizedSuggestion.contains(where: { !$0.isNewline }) else {
-                        AppLogger.info("Completion instance returned an empty suggestion")
+                    guard let normalizedSuggestion = CCCSuggestionSanitizer.sanitize(suggestion, for: context) else {
+                        AppLogger.info("Completion instance returned an empty or rejected suggestion")
                         self.dismissCompletionInstance(id, recordsIgnoredFeedback: false)
                         return
                     }
