@@ -14,8 +14,8 @@ private let cccAccentColor = NSColor(
     alpha: 1.0
 )
 
-final class OverlayWindowController {
-    private let loadingMessage = "cccchecking"
+final class OverlayWindowController: NSObject {
+    private let loadingMessage = "ccchecking"
     private let panel: NSPanel
     private let contentView: OverlayContentView
     private let logoView: CCCMarkView
@@ -24,31 +24,49 @@ final class OverlayWindowController {
     private let statusLabel: NSTextField
     private let shortcutStack: NSStackView
     private let headerStack: NSStackView
+    private let adjustLearnButton: NSButton
+    private let editActionsStack: NSStackView
+    private let discardButton: NSButton
+    private let applyButton: NSButton
     private let suggestionBoxView: SuggestionBoxView
     private let suggestionTextView: SuggestionTextView
+    private let suggestionEditScrollView: NSScrollView
+    private let suggestionEditTextView: NSTextView
     private let centeredStatusLabel: NSTextField
     private let loadingIndicator: LoadingSpinnerView
     private let loadingLabel: NSTextField
     private let loadingStack: NSStackView
     private let loadingOrderBadgeView: LoadingOrderBadgeView
+    private var suggestionBoxBottomConstraint: NSLayoutConstraint?
+    private var suggestionBoxEditingBottomConstraint: NSLayoutConstraint?
     private let suggestionLineCharacterLimit = 128
     private let suggestionPreferredWidthCharacterLimit = 80
     private let suggestionPanelMaximumWidth: CGFloat = 560
     private var presentationState: OverlayPresentationState = .status
     private var loadingOrder: Int?
+    private var originalSuggestion = ""
+    private var lastAccessibilityRect: CGRect = .zero
+    private var isAdjustingSuggestion = false
     var onInteract: (() -> Void)?
+    var onAdjustLearn: (() -> Void)?
+    var onApplyAdjustment: ((String) -> Void)?
+    var onDiscardAdjustment: (() -> Void)?
 
     var isVisible: Bool {
         panel.isVisible
     }
 
-    init() {
+    var isInAdjustmentMode: Bool {
+        isAdjustingSuggestion
+    }
+
+    override init() {
         contentView = OverlayContentView(frame: NSRect(x: 0, y: 0, width: 360, height: 96))
 
         logoView = CCCMarkView(frame: NSRect(x: 0, y: 0, width: 24, height: 24))
         logoView.translatesAutoresizingMaskIntoConstraints = false
 
-        titleLabel = NSTextField(labelWithString: "ccc")
+        titleLabel = NSTextField(labelWithString: "CCC Suggested Reply")
         titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
         titleLabel.textColor = .labelColor
         titleLabel.lineBreakMode = .byClipping
@@ -63,6 +81,8 @@ final class OverlayWindowController {
         statusLabel.lineBreakMode = .byClipping
         statusLabel.backgroundColor = .clear
 
+        adjustLearnButton = OverlayActionButton(title: "Adjust & Learn")
+
         shortcutStack = NSStackView(views: [
             ShortcutHintView(key: "Tab", action: "Accept"),
             ShortcutHintView(key: "Shift Tab", action: "Retry"),
@@ -75,11 +95,13 @@ final class OverlayWindowController {
         shortcutStack.setContentHuggingPriority(.required, for: .horizontal)
         shortcutStack.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
-        let identityStack = NSStackView(views: [logoView, titleLabel])
+        let identityStack = NSStackView(views: [logoView, titleLabel, adjustLearnButton])
         identityStack.translatesAutoresizingMaskIntoConstraints = false
         identityStack.orientation = .horizontal
         identityStack.alignment = .centerY
         identityStack.spacing = 8
+        identityStack.setContentHuggingPriority(.required, for: .horizontal)
+        identityStack.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         let statusStack = NSStackView(views: [statusDot, statusLabel])
         statusStack.translatesAutoresizingMaskIntoConstraints = false
@@ -87,7 +109,9 @@ final class OverlayWindowController {
         statusStack.alignment = .centerY
         statusStack.spacing = 7
 
-        headerStack = NSStackView(views: [identityStack, statusStack, shortcutStack])
+        statusStack.isHidden = true
+
+        headerStack = NSStackView(views: [identityStack, shortcutStack])
         headerStack.translatesAutoresizingMaskIntoConstraints = false
         headerStack.orientation = .horizontal
         headerStack.alignment = .centerY
@@ -104,6 +128,30 @@ final class OverlayWindowController {
         suggestionBoxView = SuggestionBoxView(frame: .zero)
         suggestionBoxView.translatesAutoresizingMaskIntoConstraints = false
         suggestionBoxView.addSubview(suggestionTextView)
+
+        suggestionEditTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: 320, height: 80))
+        suggestionEditTextView.translatesAutoresizingMaskIntoConstraints = false
+        Self.configureSuggestionEditor(suggestionEditTextView)
+        suggestionEditScrollView = NSScrollView()
+        suggestionEditScrollView.translatesAutoresizingMaskIntoConstraints = false
+        suggestionEditScrollView.drawsBackground = false
+        suggestionEditScrollView.borderType = .noBorder
+        suggestionEditScrollView.hasVerticalScroller = true
+        suggestionEditScrollView.hasHorizontalScroller = false
+        suggestionEditScrollView.autohidesScrollers = true
+        suggestionEditScrollView.documentView = suggestionEditTextView
+        suggestionEditScrollView.isHidden = true
+        suggestionEditScrollView.postsBoundsChangedNotifications = true
+        suggestionBoxView.addSubview(suggestionEditScrollView)
+
+        discardButton = OverlayActionButton(title: "Discard")
+        applyButton = OverlayPrimaryActionButton(title: "Apply")
+        editActionsStack = NSStackView(views: [discardButton, applyButton])
+        editActionsStack.translatesAutoresizingMaskIntoConstraints = false
+        editActionsStack.orientation = .horizontal
+        editActionsStack.alignment = .centerY
+        editActionsStack.spacing = 8
+        editActionsStack.isHidden = true
 
         centeredStatusLabel = NSTextField(labelWithString: "")
         centeredStatusLabel.font = .systemFont(ofSize: 15, weight: .semibold)
@@ -140,9 +188,22 @@ final class OverlayWindowController {
 
         contentView.addSubview(headerStack)
         contentView.addSubview(suggestionBoxView)
+        contentView.addSubview(editActionsStack)
         contentView.addSubview(centeredStatusLabel)
         contentView.addSubview(loadingStack)
         contentView.addSubview(loadingOrderBadgeView)
+
+        let suggestionBoxBottomConstraint = suggestionBoxView.bottomAnchor.constraint(
+            equalTo: contentView.bottomAnchor,
+            constant: -18
+        )
+        let suggestionBoxEditingBottomConstraint = suggestionBoxView.bottomAnchor.constraint(
+            equalTo: editActionsStack.topAnchor,
+            constant: -10
+        )
+        suggestionBoxEditingBottomConstraint.isActive = false
+        self.suggestionBoxBottomConstraint = suggestionBoxBottomConstraint
+        self.suggestionBoxEditingBottomConstraint = suggestionBoxEditingBottomConstraint
 
         NSLayoutConstraint.activate([
             logoView.widthAnchor.constraint(equalToConstant: 24),
@@ -157,12 +218,20 @@ final class OverlayWindowController {
             suggestionBoxView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
             suggestionBoxView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
             suggestionBoxView.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 12),
-            suggestionBoxView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -18),
+            suggestionBoxBottomConstraint,
 
             suggestionTextView.leadingAnchor.constraint(equalTo: suggestionBoxView.leadingAnchor, constant: 16),
             suggestionTextView.trailingAnchor.constraint(equalTo: suggestionBoxView.trailingAnchor, constant: -16),
             suggestionTextView.topAnchor.constraint(equalTo: suggestionBoxView.topAnchor, constant: 12),
             suggestionTextView.bottomAnchor.constraint(equalTo: suggestionBoxView.bottomAnchor, constant: -12),
+
+            suggestionEditScrollView.leadingAnchor.constraint(equalTo: suggestionBoxView.leadingAnchor, constant: 14),
+            suggestionEditScrollView.trailingAnchor.constraint(equalTo: suggestionBoxView.trailingAnchor, constant: -14),
+            suggestionEditScrollView.topAnchor.constraint(equalTo: suggestionBoxView.topAnchor, constant: 10),
+            suggestionEditScrollView.bottomAnchor.constraint(equalTo: suggestionBoxView.bottomAnchor, constant: -10),
+
+            editActionsStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
+            editActionsStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -18),
 
             centeredStatusLabel.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
             centeredStatusLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
@@ -180,9 +249,9 @@ final class OverlayWindowController {
             loadingOrderBadgeView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor)
         ])
 
-        panel = NSPanel(
+        panel = OverlayPanel(
             contentRect: NSRect(x: 0, y: 0, width: 360, height: 96),
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
@@ -195,13 +264,82 @@ final class OverlayWindowController {
         panel.acceptsMouseMovedEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = contentView
+        panel.hidesOnDeactivate = false
+        super.init()
         contentView.onInteract = { [weak self] in
             self?.onInteract?()
         }
+        adjustLearnButton.target = self
+        adjustLearnButton.action = #selector(adjustLearnPressed(_:))
+        discardButton.target = self
+        discardButton.action = #selector(discardAdjustmentPressed(_:))
+        applyButton.target = self
+        applyButton.action = #selector(applyAdjustmentPressed(_:))
+    }
+
+    @objc
+    private func adjustLearnPressed(_ sender: NSButton) {
+        onInteract?()
+        onAdjustLearn?()
+        enterAdjustmentMode()
+    }
+
+    @objc
+    private func discardAdjustmentPressed(_ sender: NSButton) {
+        onInteract?()
+        exitAdjustmentMode(restoringOriginal: true)
+        onDiscardAdjustment?()
+    }
+
+    @objc
+    private func applyAdjustmentPressed(_ sender: NSButton) {
+        onInteract?()
+        onApplyAdjustment?(suggestionEditTextView.string)
+    }
+
+    private static func configureSuggestionEditor(_ textView: NSTextView) {
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.drawsBackground = false
+        textView.allowsUndo = true
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.font = SuggestionTextView.textFont
+        textView.textColor = .labelColor
+        textView.insertionPointColor = cccAccentColor
+        textView.textContainerInset = NSSize(width: 2, height: 2)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.heightTracksTextView = false
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        textView.autoresizingMask = [.width]
+        textView.typingAttributes = SuggestionTextView.textAttributes()
+    }
+
+    func exitAdjustmentMode(restoringOriginal: Bool) {
+        guard isAdjustingSuggestion else {
+            return
+        }
+
+        isAdjustingSuggestion = false
+        if restoringOriginal {
+            populateSuggestionEditor(with: originalSuggestion, placeCursorAtEnd: true)
+        }
+        updateSuggestionModeViews()
+        resizeForCurrentSuggestion(animated: true)
     }
 
     func show(suggestion: String, near accessibilityRect: CGRect) {
         stopLoadingAnimation()
+        originalSuggestion = suggestion
+        populateSuggestionEditor(with: suggestion, placeCursorAtEnd: true)
+        isAdjustingSuggestion = false
         show(
             message: suggestion,
             near: accessibilityRect,
@@ -242,6 +380,7 @@ final class OverlayWindowController {
         state: OverlayPresentationState
     ) {
         presentationState = state
+        lastAccessibilityRect = accessibilityRect
         contentView.presentationState = state
 
         headerStack.isHidden = state != .suggestion
@@ -249,6 +388,7 @@ final class OverlayWindowController {
         centeredStatusLabel.isHidden = state != .status
         loadingStack.isHidden = state != .loading
         loadingOrderBadgeView.isHidden = state != .loading || (loadingOrder ?? 1) <= 1
+        updateSuggestionModeViews()
 
         let displayMessage = state == .suggestion
             ? wrappedSuggestionText(message, limit: suggestionLineCharacterLimit)
@@ -295,6 +435,121 @@ final class OverlayWindowController {
         panel.orderFrontRegardless()
         animateAppearance(to: frame)
         contentView.startAnimating()
+    }
+
+    private func enterAdjustmentMode() {
+        guard presentationState == .suggestion, !isAdjustingSuggestion else {
+            return
+        }
+
+        isAdjustingSuggestion = true
+        populateSuggestionEditor(with: originalSuggestion, placeCursorAtEnd: true)
+        updateSuggestionModeViews()
+        resizeForCurrentSuggestion(animated: true)
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKey()
+        panel.orderFrontRegardless()
+        panel.makeFirstResponder(suggestionEditTextView)
+        syncSuggestionEditorFrame()
+        AppLogger.info("Adjust & Learn editor focus requested. IsFirstResponder=\(panel.firstResponder === suggestionEditTextView)")
+    }
+
+    private func updateSuggestionModeViews() {
+        let showSuggestion = presentationState == .suggestion
+        let showEditor = showSuggestion && isAdjustingSuggestion
+        suggestionTextView.isHidden = showEditor
+        suggestionEditScrollView.isHidden = !showEditor
+        editActionsStack.isHidden = !showEditor
+        shortcutStack.isHidden = showEditor
+        adjustLearnButton.isHidden = showEditor
+        statusLabel.stringValue = showEditor ? "Adjust & Learn" : "Suggested reply"
+        suggestionBoxBottomConstraint?.isActive = !showEditor
+        suggestionBoxEditingBottomConstraint?.isActive = showEditor
+        if showEditor {
+            syncSuggestionEditorFrame()
+        }
+    }
+
+    private func resizeForCurrentSuggestion(animated: Bool) {
+        guard panel.isVisible else {
+            return
+        }
+
+        let currentFrame = panel.frame
+        let preferredSize = preferredSize(
+            for: originalSuggestion,
+            in: screenFrame(containing: currentFrame) ?? fallbackScreenFrame(),
+            state: .suggestion
+        )
+        let constrainedFrame = constrainedFrame(
+            CGRect(origin: currentFrame.origin, size: preferredSize),
+            near: currentFrame
+        )
+        let frame = CGRect(
+            x: currentFrame.minX,
+            y: currentFrame.minY,
+            width: constrainedFrame.width,
+            height: constrainedFrame.height
+        )
+        panel.contentView?.frame = CGRect(origin: .zero, size: frame.size)
+        contentView.layoutSubtreeIfNeeded()
+        syncSuggestionEditorFrame()
+
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.16
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().setFrame(frame, display: true)
+            } completionHandler: {
+                self.contentView.layoutSubtreeIfNeeded()
+                self.syncSuggestionEditorFrame()
+            }
+        } else {
+            panel.setFrame(frame, display: true)
+        }
+    }
+
+    private func populateSuggestionEditor(with text: String, placeCursorAtEnd: Bool) {
+        suggestionEditTextView.textStorage?.setAttributedString(
+            NSAttributedString(
+                string: text,
+                attributes: SuggestionTextView.textAttributes()
+            )
+        )
+        suggestionEditTextView.typingAttributes = SuggestionTextView.textAttributes()
+
+        if placeCursorAtEnd {
+            suggestionEditTextView.setSelectedRange(
+                NSRange(location: (text as NSString).length, length: 0)
+            )
+        }
+        AppLogger.info("Adjust & Learn editor populated. Length=\((text as NSString).length)")
+    }
+
+    private func syncSuggestionEditorFrame() {
+        let viewportSize = suggestionEditScrollView.contentView.bounds.size
+        guard viewportSize.width > 0, viewportSize.height > 0 else {
+            return
+        }
+
+        let textHeight = ceil(
+            SuggestionTextView.boundingRect(
+                for: suggestionEditTextView.string,
+                width: max(1, viewportSize.width - 4),
+                height: CGFloat.greatestFiniteMagnitude
+            ).height
+        ) + 12
+        let editorSize = NSSize(width: viewportSize.width, height: max(viewportSize.height, textHeight))
+        suggestionEditTextView.minSize = NSSize(width: viewportSize.width, height: viewportSize.height)
+        suggestionEditTextView.maxSize = NSSize(
+            width: viewportSize.width,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        suggestionEditTextView.textContainer?.containerSize = NSSize(
+            width: max(1, viewportSize.width),
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        suggestionEditTextView.frame = NSRect(origin: .zero, size: editorSize)
     }
 
     func hide() {
@@ -422,7 +677,8 @@ final class OverlayWindowController {
         case .suggestion:
             let maxWidth = min(max(280, targetFrame.width - 32), suggestionPanelMaximumWidth)
             let minWidth: CGFloat = min(360, maxWidth)
-            let panelVerticalChrome: CGFloat = 18 + 28 + 12 + 28 + 18
+            let editActionsHeight: CGFloat = isAdjustingSuggestion ? 40 : 0
+            let panelVerticalChrome: CGFloat = 18 + 28 + 12 + 28 + 18 + editActionsHeight
             let maxPanelHeight = max(136, targetFrame.height - 52)
             let maxTextHeight = max(96, maxPanelHeight - panelVerticalChrome)
             let sizingMessage = wrappedSuggestionText(
@@ -430,11 +686,15 @@ final class OverlayWindowController {
                 limit: suggestionPreferredWidthCharacterLimit
             )
             let measuredLineWidth = SuggestionTextView.maxLineWidth(for: sizingMessage)
-            let naturalWidth = min(maxWidth, max(minWidth, ceil(measuredLineWidth) + 80))
+            let headerWidth = ceil(headerStack.fittingSize.width) + 48
+            let naturalWidth = min(maxWidth, max(minWidth, ceil(measuredLineWidth) + 80, headerWidth))
             let textWidth = naturalWidth - 80
             let textRect = SuggestionTextView.boundingRect(for: message, width: textWidth, height: maxTextHeight)
             let suggestionBoxHeight = max(58, ceil(textRect.height) + 28)
-            let height = max(136, min(maxPanelHeight, 18 + 28 + 12 + suggestionBoxHeight + 18))
+            let height = max(
+                136,
+                min(maxPanelHeight, 18 + 28 + 12 + suggestionBoxHeight + 18 + editActionsHeight)
+            )
             return CGSize(width: naturalWidth, height: height)
         }
     }
@@ -552,6 +812,47 @@ private final class LoadingSpinnerView: NSView {
     }
 }
 
+private final class OverlayPanel: NSPanel {
+    override var canBecomeKey: Bool {
+        true
+    }
+
+    override var canBecomeMain: Bool {
+        false
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.modifierFlags.contains(.command),
+              let textView = firstResponder as? NSTextView else {
+            return super.performKeyEquivalent(with: event)
+        }
+
+        switch event.charactersIgnoringModifiers?.lowercased() {
+        case "a":
+            textView.selectAll(nil)
+            return true
+        case "x":
+            textView.cut(nil)
+            return true
+        case "c":
+            textView.copy(nil)
+            return true
+        case "v":
+            textView.paste(nil)
+            return true
+        case "z":
+            if event.modifierFlags.contains(.shift) {
+                textView.undoManager?.redo()
+            } else {
+                textView.undoManager?.undo()
+            }
+            return true
+        default:
+            return super.performKeyEquivalent(with: event)
+        }
+    }
+}
+
 private final class OverlayContentView: NSView {
     var onInteract: (() -> Void)?
     var presentationState: OverlayPresentationState = .status {
@@ -596,7 +897,20 @@ private final class OverlayContentView: NSView {
     func stopAnimating() {}
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        bounds.contains(point) ? self : nil
+        guard bounds.contains(point) else {
+            return nil
+        }
+
+        if presentationState == .suggestion,
+           let editorHitView = editableHitView(at: point) {
+            return editorHitView
+        }
+
+        guard let hitView = super.hitTest(point), hitView !== self else {
+            return self
+        }
+
+        return hitView.shouldReceiveOverlayInteraction ? hitView : self
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
@@ -640,6 +954,25 @@ private final class OverlayContentView: NSView {
         NSCursor.pop()
     }
 
+    private func editableHitView(at point: NSPoint) -> NSView? {
+        for subview in subviews.reversed() {
+            guard !subview.isHidden,
+                  subview.alphaValue > 0 else {
+                continue
+            }
+
+            let convertedPoint = subview.convert(point, from: self)
+            guard let hitView = subview.hitTest(convertedPoint),
+                  hitView.shouldReceiveOverlayInteraction else {
+                continue
+            }
+
+            return hitView
+        }
+
+        return nil
+    }
+
     override func layout() {
         super.layout()
 
@@ -658,6 +991,20 @@ private final class OverlayContentView: NSView {
 
         borderLayer.frame = bounds
         borderLayer.path = cardPath
+    }
+}
+
+private extension NSView {
+    var shouldReceiveOverlayInteraction: Bool {
+        if self is NSControl
+            || self is NSTextView
+            || self is NSScrollView
+            || self is NSClipView
+            || self is NSScroller {
+            return true
+        }
+
+        return superview?.shouldReceiveOverlayInteraction == true
     }
 }
 
@@ -721,7 +1068,7 @@ private final class SuggestionTextView: NSView {
         }
     }
 
-    private static func textAttributes() -> [NSAttributedString.Key: Any] {
+    static func textAttributes() -> [NSAttributedString.Key: Any] {
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineBreakMode = .byCharWrapping
         paragraphStyle.alignment = .left
@@ -769,6 +1116,38 @@ private final class SuggestionBoxView: NSView {
         backgroundLayer.cornerRadius = 7
         borderLayer.frame = bounds
         borderLayer.path = path
+    }
+}
+
+private class OverlayActionButton: NSButton {
+    init(title: String) {
+        super.init(frame: .zero)
+        self.title = title
+        font = .systemFont(ofSize: 12, weight: .medium)
+        bezelStyle = .rounded
+        controlSize = .small
+        setButtonType(.momentaryPushIn)
+        isBordered = true
+        translatesAutoresizingMaskIntoConstraints = false
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+}
+
+private final class OverlayPrimaryActionButton: OverlayActionButton {
+    override init(title: String) {
+        super.init(title: title)
+        contentTintColor = cccAccentColor
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
     }
 }
 

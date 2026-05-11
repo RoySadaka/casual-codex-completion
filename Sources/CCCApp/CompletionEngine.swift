@@ -41,6 +41,7 @@ extension CompletionEngine {
 
 enum CompletionFeedback {
     case approved(CompletionFeedbackDetails)
+    case adjusted(CompletionAdjustmentFeedbackDetails)
     case ignored(CompletionFeedbackDetails)
     case retry
 }
@@ -50,6 +51,14 @@ struct CompletionFeedbackDetails {
     let instanceID: String
     let appName: String
     let suggestion: String
+}
+
+struct CompletionAdjustmentFeedbackDetails {
+    let instanceOrder: Int
+    let instanceID: String
+    let appName: String
+    let originalSuggestion: String
+    let adjustedSuggestion: String
 }
 
 struct CodexSideThreadSuggestion {
@@ -263,17 +272,46 @@ private enum PromptRole {
     static func feedbackPrompt(for feedback: CompletionFeedback) -> String {
         let basePrompt: String
         let details: CompletionFeedbackDetails?
+        let adjustmentDetails: CompletionAdjustmentFeedbackDetails?
 
         switch feedback {
         case .approved(let feedbackDetails):
             basePrompt = injectUserName(into: loadRequiredTemplate(.feedbackApproved))
             details = feedbackDetails
+            adjustmentDetails = nil
+        case .adjusted(let feedbackDetails):
+            basePrompt = injectUserName(into: loadRequiredTemplate(.feedbackApproved))
+            details = nil
+            adjustmentDetails = feedbackDetails
         case .ignored(let feedbackDetails):
             basePrompt = injectUserName(into: loadRequiredTemplate(.feedbackIgnored))
             details = feedbackDetails
+            adjustmentDetails = nil
         case .retry:
             basePrompt = injectUserName(into: loadRequiredTemplate(.feedbackRetry))
             details = nil
+            adjustmentDetails = nil
+        }
+
+        if let adjustmentDetails {
+            return """
+            \(basePrompt)
+
+            High-profile Adjust & Learn feedback:
+            - The user explicitly edited CCC's suggestion before applying it.
+            - Treat the edited text as a stronger learning signal than a normal accept.
+            - Learn the delta between the original suggestion and the edited final text.
+            - Do not repeat the original wording when the edited wording shows a better style, tone, structure, specificity, or intent.
+
+            Feedback context:
+            - CCC instance: \(adjustmentDetails.instanceOrder)
+            - CCC request ID: \(adjustmentDetails.instanceID)
+            - App: \(adjustmentDetails.appName)
+            - Original suggestion:
+            \(adjustmentDetails.originalSuggestion)
+            - User-edited applied suggestion:
+            \(adjustmentDetails.adjustedSuggestion)
+            """
         }
 
         guard let details else {

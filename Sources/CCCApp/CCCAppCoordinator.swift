@@ -217,6 +217,13 @@ final class CCCAppCoordinator {
             return false
         }
 
+        if let activeCompletionID,
+           let activeCompletion = completionInstances[activeCompletionID],
+           activeCompletion.overlay.isInAdjustmentMode {
+            AppLogger.info("Dismiss requested while Adjust & Learn editor is active; passing key through")
+            return false
+        }
+
         if let activeCompletionID {
             dismissCompletionInstance(activeCompletionID, recordsIgnoredFeedback: true)
             return true
@@ -234,6 +241,11 @@ final class CCCAppCoordinator {
               let activeCompletion = completionInstances[activeCompletionID],
               let activeSuggestion = activeCompletion.suggestion
         else {
+            return false
+        }
+
+        guard !activeCompletion.overlay.isInAdjustmentMode else {
+            AppLogger.info("Retry requested while Adjust & Learn editor is active; passing key through")
             return false
         }
 
@@ -384,6 +396,19 @@ final class CCCAppCoordinator {
         let overlay = OverlayWindowController()
         overlay.onInteract = { [weak self] in
             self?.activeCompletionID = id
+        }
+        overlay.onAdjustLearn = { [weak self] in
+            guard let self else { return }
+            self.activeCompletionID = id
+            self.keyEventTap.setTripleCTriggerEnabled(false)
+        }
+        overlay.onDiscardAdjustment = { [weak self] in
+            guard let self else { return }
+            self.activeCompletionID = id
+            self.restoreTripleCTriggerIfNeeded()
+        }
+        overlay.onApplyAdjustment = { [weak self] adjustedSuggestion in
+            self?.applyAdjustedSuggestion(id, adjustedSuggestion: adjustedSuggestion)
         }
 
         let instance = CompletionInstance(
@@ -568,6 +593,11 @@ final class CCCAppCoordinator {
             return false
         }
 
+        guard !activeCompletion.overlay.isInAdjustmentMode else {
+            AppLogger.info("Accept requested while Adjust & Learn editor is active; passing key through")
+            return false
+        }
+
         AppLogger.info("Attempting to insert suggestion: \(suggestion)")
         AppLogger.info("Using paste-only insertion mode")
         let inserted = inputInjector.insertUsingPasteboard(
@@ -586,6 +616,50 @@ final class CCCAppCoordinator {
         }
 
         return inserted
+    }
+
+    private func applyAdjustedSuggestion(_ id: UUID, adjustedSuggestion: String) {
+        guard !sleeping else {
+            return
+        }
+
+        guard let activeCompletion = completionInstances[id],
+              let originalSuggestion = activeCompletion.suggestion else {
+            AppLogger.info("Adjusted suggestion apply requested but no matching suggestion is visible")
+            return
+        }
+
+        guard adjustedSuggestion.contains(where: { !$0.isNewline }) else {
+            AppLogger.info("Adjusted suggestion apply rejected because edited text is empty")
+            NSSound.beep()
+            return
+        }
+
+        AppLogger.info("Attempting to insert adjusted suggestion: \(adjustedSuggestion)")
+        let inserted = inputInjector.insertUsingPasteboard(
+            adjustedSuggestion,
+            targetPID: activeCompletion.context.appPID
+        )
+
+        if inserted {
+            activeCompletion.overlay.exitAdjustmentMode(restoringOriginal: false)
+            enqueueCodexWorkItem(
+                .feedback(
+                    .adjusted(
+                        adjustmentFeedbackDetails(
+                            for: activeCompletion,
+                            originalSuggestion: originalSuggestion,
+                            adjustedSuggestion: adjustedSuggestion
+                        )
+                    )
+                )
+            )
+            dismissCompletionInstance(id, recordsIgnoredFeedback: false)
+            restoreTripleCTriggerIfNeeded()
+        } else {
+            AppLogger.error("Adjusted suggestion insertion failed")
+            NSSound.beep()
+        }
     }
 
     private func dismissCompletionInstance(_ id: UUID, recordsIgnoredFeedback: Bool) {
@@ -613,6 +687,8 @@ final class CCCAppCoordinator {
         if activeCompletionID == id {
             activeCompletionID = completionInstances.keys.first
         }
+
+        restoreTripleCTriggerIfNeeded()
     }
 
     private func dismissAllCompletionInstances(recordsIgnoredFeedback: Bool) {
@@ -621,6 +697,14 @@ final class CCCAppCoordinator {
             dismissCompletionInstance(id, recordsIgnoredFeedback: recordsIgnoredFeedback)
         }
         activeCompletionID = nil
+        restoreTripleCTriggerIfNeeded()
+    }
+
+    private func restoreTripleCTriggerIfNeeded() {
+        let adjustmentEditorIsActive = completionInstances.values.contains {
+            $0.overlay.isInAdjustmentMode
+        }
+        keyEventTap.setTripleCTriggerEnabled(!sleeping && !adjustmentEditorIsActive)
     }
 
     private func feedbackDetails(
@@ -632,6 +716,20 @@ final class CCCAppCoordinator {
             instanceID: instance.codexRequestID,
             appName: instance.context.appName,
             suggestion: suggestion
+        )
+    }
+
+    private func adjustmentFeedbackDetails(
+        for instance: CompletionInstance,
+        originalSuggestion: String,
+        adjustedSuggestion: String
+    ) -> CompletionAdjustmentFeedbackDetails {
+        CompletionAdjustmentFeedbackDetails(
+            instanceOrder: instance.loadingOrder,
+            instanceID: instance.codexRequestID,
+            appName: instance.context.appName,
+            originalSuggestion: originalSuggestion,
+            adjustedSuggestion: adjustedSuggestion
         )
     }
 

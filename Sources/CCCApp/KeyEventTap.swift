@@ -63,6 +63,12 @@ final class KeyEventTap {
             let flags = event.flags
             let characters = tap.unicodeCharacters(for: event)
 
+            if flags.contains(.maskCommand) {
+                tap.cancelTripleCTriggerStreakIfNeeded(keyCode: keyCode, flags: flags, characters: characters)
+                let keyPress = KeyPress(keyCode: keyCode, flags: flags, characters: characters)
+                return tap.handler(.keyPress(keyPress)) ? nil : Unmanaged.passUnretained(event)
+            }
+
             if keyCode == 48 {
                 let disallowedFlags: CGEventFlags = [
                     .maskCommand,
