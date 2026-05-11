@@ -37,6 +37,7 @@ final class KeyEventTap {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var recentCTimestamps: [TimeInterval] = []
+    private var recentCCharacters: [String] = []
     private var tripleCTriggerEnabled = true
     private var screenshotContextEnabled = false
 
@@ -91,15 +92,17 @@ final class KeyEventTap {
 
             if tap.shouldTreatAsTripleCTriggerCandidate(keyCode: keyCode, flags: flags, characters: characters) {
                 guard tap.tripleCTriggerEnabled else {
-                    tap.recentCTimestamps.removeAll()
+                    tap.resetTripleCTriggerStreak()
                     let keyPress = KeyPress(keyCode: keyCode, flags: flags, characters: characters)
                     return tap.handler(.keyPress(keyPress)) ? nil : Unmanaged.passUnretained(event)
                 }
 
-                if tap.registerPassiveTripleCTrigger() {
+                if tap.registerPassiveTripleCTrigger(characters: characters) {
                     AppLogger.info("Hotkey detected: triple-c")
                     tap.captureTripleCTrigger()
                 }
+            } else {
+                tap.cancelTripleCTriggerStreakIfNeeded(keyCode: keyCode, flags: flags, characters: characters)
             }
 
             let keyPress = KeyPress(keyCode: keyCode, flags: flags, characters: characters)
@@ -133,7 +136,7 @@ final class KeyEventTap {
         }
 
         tripleCTriggerEnabled = enabled
-        recentCTimestamps.removeAll()
+        resetTripleCTriggerStreak()
     }
 
     func setScreenshotContextEnabled(_ enabled: Bool, promptForPermission: Bool = false) {
@@ -153,7 +156,6 @@ final class KeyEventTap {
             .maskCommand,
             .maskControl,
             .maskAlternate,
-            .maskShift,
             .maskSecondaryFn
         ]
 
@@ -161,20 +163,47 @@ final class KeyEventTap {
             return false
         }
 
-        return characters.lowercased() == "c"
+        return characters == "c" || characters == "C"
     }
 
-    private func registerPassiveTripleCTrigger() -> Bool {
+    private func cancelTripleCTriggerStreakIfNeeded(keyCode: Int64, flags: CGEventFlags, characters: String) {
+        guard !recentCTimestamps.isEmpty else {
+            return
+        }
+
+        if keyCode == Int64(kVK_ANSI_C) {
+            resetTripleCTriggerStreak()
+            AppLogger.info("Cancelled triple-c trigger streak because c was typed with disallowed modifiers")
+            return
+        }
+
+        resetTripleCTriggerStreak()
+        AppLogger.info("Cancelled triple-c trigger streak because a non-c key was pressed")
+    }
+
+    private func registerPassiveTripleCTrigger(characters: String) -> Bool {
         let now = CFAbsoluteTimeGetCurrent()
         recentCTimestamps.append(now)
-        recentCTimestamps = recentCTimestamps.filter { now - $0 <= tripleCThreshold }
+        recentCCharacters.append(characters)
+
+        let retained = recentCTimestamps.enumerated()
+            .filter { now - $0.element <= tripleCThreshold }
+        recentCTimestamps = retained.map(\.element)
+        recentCCharacters = retained.map { recentCCharacters[$0.offset] }
 
         guard recentCTimestamps.count >= 3 else {
             return false
         }
 
+        let isLowercaseTrigger = recentCCharacters.allSatisfy { $0 == "c" }
+        let isUppercaseTrigger = recentCCharacters.allSatisfy { $0 == "C" }
+        resetTripleCTriggerStreak()
+        return isLowercaseTrigger || isUppercaseTrigger
+    }
+
+    private func resetTripleCTriggerStreak() {
         recentCTimestamps.removeAll()
-        return true
+        recentCCharacters.removeAll()
     }
 
     private func captureTripleCTrigger() {
