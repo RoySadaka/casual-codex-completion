@@ -8,7 +8,7 @@ Want CCC? Point Codex at this repo and tell it to follow [HOW_TO_INSTALL.md](HOW
 
 CCC is a macOS app that lets you summon Codex into almost any textbox as a context-aware writing assistant.
 
-Smash the `c` key three times to summon CCC into your scope. CCC will call out to your local Codex CLI, understand the focused app and visible context, and offer useful text inline right where you are working. Sometimes that is a continuation. Sometimes it is a reply, task note, prompt, command, clarification, or next-step draft. Notes, chats, docs, forms, prompts, random text fields: if you can type there, CCC aims to bring Codex there too.
+Smash the `c` key three times to summon CCC into your scope. CCC listens for an exact `ccc` or `CCC` streak within the trigger timing window, so mixed-case or interrupted key sequences do not invoke it accidentally. CCC will call out to your local Codex CLI, understand the focused app and visible context, and offer useful text inline right where you are working. Sometimes that is a continuation. Sometimes it is a reply, task note, prompt, command, clarification, or next-step draft. Notes, chats, docs, forms, prompts, random text fields: if you can type there, CCC aims to bring Codex there too.
 
 The core idea is simple:
 
@@ -41,8 +41,9 @@ Repo layout:
 - Runs as a lightweight macOS app with a small control window.
 - Watches typing through a global event tap while the app is active.
 - Requests context-aware assistance from the local Codex CLI when you hit `ccc`.
-- Shows a floating suggestion.
+- Shows a floating `ccchecking` spinner while Codex is working, then a floating suggestion.
 - Accepts the suggestion into the active app through paste-based injection.
+- Lets you adjust a suggestion in-place before applying it, then feeds that higher-signal edit back to Codex.
 
 ## Shortcuts
 
@@ -50,6 +51,17 @@ Repo layout:
 - `Tab`: accept the visible suggestion
 - `Shift+Tab`: retry and ask for another option
 - `Escape`: dismiss the visible suggestion
+
+## Adjust & Learn
+
+When CCC shows a suggestion, the popup includes an `Adjust & Learn` button next to `CCC Suggested Reply`.
+
+Clicking it keeps the popup in place and switches the suggestion body into an editable text box already filled with the suggested text. From there:
+
+- `Discard` exits edit mode and restores the original suggestion.
+- `Apply` inserts the edited text into the active app and tells Codex that the user intentionally adjusted the suggestion.
+
+The edit box supports standard macOS editing shortcuts such as `Cmd+A`, `Cmd+C`, `Cmd+X`, `Cmd+V`, `Cmd+Z`, and `Cmd+Shift+Z`.
 
 ## Requirements
 
