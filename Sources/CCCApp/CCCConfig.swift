@@ -3,6 +3,12 @@ import Foundation
 enum CCCConfig {
     static let defaultPromptPrefixCharacterLimit = 4096
     static let defaultCompactionInvocationInterval = 10
+    static let codexCLIPathCandidates = [
+        "/Applications/Codex.app/Contents/Resources/codex",
+        "/Applications/ChatGPT.app/Contents/Resources/codex",
+        "/usr/local/bin/codex",
+        "/opt/homebrew/bin/codex"
+    ]
 
     static func stringValue(forKey key: String) -> String? {
         guard var value = rawValue(forKey: key) ?? defaultStringValue(forKey: key) else {
@@ -87,6 +93,21 @@ enum CCCConfig {
         }
 
         return value
+    }
+
+    static var codexCLIPath: String? {
+        let configuredPath = stringValue(forKey: "codex_cli_path")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmpty
+
+        if let configuredPath,
+           FileManager.default.isExecutableFile(atPath: configuredPath) {
+            return configuredPath
+        }
+
+        return codexCLIPathCandidates.first { candidate in
+            FileManager.default.isExecutableFile(atPath: candidate)
+        }
     }
 
     static func setStringValue(_ value: String?, forKey key: String) throws {
@@ -189,10 +210,11 @@ enum CCCConfig {
     private static func defaultStringValue(forKey key: String) -> String? {
         switch key {
         case "codex_cli_path":
-            let defaultPath = "/Applications/Codex.app/Contents/Resources/codex"
-            return FileManager.default.isExecutableFile(atPath: defaultPath) ? defaultPath : nil
+            return codexCLIPathCandidates.first { candidate in
+                FileManager.default.isExecutableFile(atPath: candidate)
+            }
         case "model":
-            return "gpt-5.5"
+            return "gpt-5.6-sol"
         case "reasoning_effort":
             return "medium"
         default:

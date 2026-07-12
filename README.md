@@ -128,14 +128,14 @@ For local repo development, `scripts/run-local.sh` sets `CCC_CONFIG_FILE` to `.l
 Supported keys:
 
 ```toml
-codex_cli_path = "/Applications/Codex.app/Contents/Resources/codex"
-model = "gpt-5.5"
+model = "gpt-5.6-sol"
 dev_mode = false
 ```
 
 Optional overrides:
 
 ```toml
+# codex_cli_path = "/Applications/ChatGPT.app/Contents/Resources/codex"
 # reasoning_effort = "medium"
 # user_name = "Your Name"
 # prompt_prefix_char_limit = 4096
@@ -144,8 +144,8 @@ Optional overrides:
 
 Defaults:
 
-- `codex_cli_path` defaults to the standard Codex desktop bundle path when present
-- `model` defaults to `gpt-5.5`
+- `codex_cli_path` defaults to the first executable Codex binary found in common desktop and CLI install locations
+- `model` defaults to `gpt-5.6-sol`
 - `reasoning_effort` defaults to `medium`
 - `prompt_prefix_char_limit` defaults to `4096`
 - `compaction_invocation_interval` defaults to `10`; set it to `0` to disable native Codex compaction

@@ -60,14 +60,14 @@ Default local config template:
 Main keys:
 
 ```toml
-codex_cli_path = "/Applications/Codex.app/Contents/Resources/codex"
-model = "gpt-5.5"
+model = "gpt-5.6-sol"
 dev_mode = false
 ```
 
 Optional:
 
 ```toml
+# codex_cli_path = "/Applications/ChatGPT.app/Contents/Resources/codex"
 # reasoning_effort = "medium"
 # user_name = "Your Name"
 # prompt_prefix_char_limit = 4096

@@ -502,9 +502,8 @@ final class CodexCLICompletionEngine: CompletionEngine {
     }
 
     static func fromConfiguration() -> CodexCLICompletionEngine {
-        let codexPath = CCCConfig.requiredStringValue(forKey: "codex_cli_path")
-        guard FileManager.default.isExecutableFile(atPath: codexPath) else {
-            fatalError("Configured codex_cli_path is not executable: \(codexPath)")
+        guard let codexPath = CCCConfig.codexCLIPath else {
+            fatalError("Could not find an executable Codex CLI. Set codex_cli_path in \(CCCPaths.configFileURL.path)")
         }
 
         let model = CCCConfig.requiredStringValue(forKey: "model")
